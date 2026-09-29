@@ -37,6 +37,7 @@ add_executable(obs-backuper-core-tests
   test_PathUtf8.cpp
   test_ActiveSelection.cpp
   test_GuardedCall.cpp
+  test_SceneCollectionSnapshot.cpp
 )
 
 target_link_libraries(obs-backuper-core-tests PRIVATE obs-backuper-core Catch2::Catch2WithMain)

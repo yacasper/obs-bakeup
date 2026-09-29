@@ -69,6 +69,41 @@ ActiveSelection ParseActiveSelection(const std::string &iniText)
 	return selection;
 }
 
+std::vector<IniEntry> ParseIniEntries(const std::string &iniText)
+{
+	std::vector<IniEntry> entries;
+	std::istringstream lines(iniText);
+	std::string line;
+	std::string section;
+	bool firstLine = true;
+
+	while (std::getline(lines, line)) {
+		if (!line.empty() && line.back() == '\r')
+			line.pop_back();
+		if (firstLine && line.compare(0, 3, "\xEF\xBB\xBF") == 0)
+			line.erase(0, 3);
+		firstLine = false;
+
+		if (line.empty() || line.front() == ';' || line.front() == '#')
+			continue;
+		if (line.front() == '[') {
+			const auto close = line.find(']');
+			section = line.substr(1, close == std::string::npos ? std::string::npos : close - 1);
+			continue;
+		}
+		const auto separator = line.find('=');
+		if (separator == std::string::npos || separator == 0)
+			continue;
+		entries.push_back({section, line.substr(0, separator), line.substr(separator + 1)});
+	}
+	return entries;
+}
+
+std::vector<IniEntry> ReadIniEntries(const std::filesystem::path &obsDataDir, const std::string &fileName)
+{
+	return ParseIniEntries(ReadWholeFile(obsDataDir / fileName));
+}
+
 ActiveSelection ReadActiveSelection(const std::filesystem::path &obsDataDir)
 {
 	ActiveSelection selection = ParseActiveSelection(ReadWholeFile(obsDataDir / "user.ini"));

@@ -79,3 +79,31 @@ TEST_CASE("ReadActiveSelection handles missing files", "[ActiveSelection]")
 	CHECK(selection.sceneCollection.empty());
 	CHECK(ReadActiveSelection(dir.root / "does-not-exist").profile.empty());
 }
+
+TEST_CASE("ParseIniEntries keeps values exactly, including = and quotes", "[ActiveSelection]")
+{
+	const std::string json = "[{\"title\":\"Chat\",\"url\":\"http://x/?a=b\"}]";
+	const auto entries = ParseIniEntries("[General]\r\nA=1\r\n\r\n; comment\n[BasicWindow]\nExtraBrowserDocks=" + json +
+					     "\nEmpty=\nnot a pair\n=nokey\n");
+
+	REQUIRE(entries.size() == 3);
+	CHECK(entries[0].section == "General");
+	CHECK(entries[0].key == "A");
+	CHECK(entries[0].value == "1");
+	CHECK(entries[1].section == "BasicWindow");
+	CHECK(entries[1].key == "ExtraBrowserDocks");
+	CHECK(entries[1].value == json);
+	CHECK(entries[2].key == "Empty");
+	CHECK(entries[2].value.empty());
+}
+
+TEST_CASE("ReadIniEntries reads a file and gives nothing for a missing one", "[ActiveSelection]")
+{
+	TempDir dir;
+	dir.Write("user.ini", "[BasicWindow]\nDockState=abc\n");
+
+	const auto entries = ReadIniEntries(dir.root, "user.ini");
+	REQUIRE(entries.size() == 1);
+	CHECK(entries[0].value == "abc");
+	CHECK(ReadIniEntries(dir.root, "missing.ini").empty());
+}

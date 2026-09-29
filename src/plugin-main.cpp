@@ -4,11 +4,13 @@
 
 #include <obs-module.h>
 #include <obs-frontend-api.h>
+#include <util/config-file.h>
 
 #include "ObsConfigPathProvider.h"
 #include "core/RestoreManager.h"
 #include "core/ActiveSelection.h"
 #include "core/PathUtf8.h"
+#include "core/SceneCollectionSnapshot.h"
 #include "plugin-support.h"
 #include "ui/BackupDialog.h"
 #include "ui/ErrorDialog.h"
@@ -47,6 +49,9 @@ static std::string pendingRestoreErrorMessage;
 static obs_backuper::ErrorKind pendingRestoreErrorKind = obs_backuper::ErrorKind::None;
 // The profile / scene collection the restored config names (empty: none).
 static obs_backuper::ActiveSelection pendingRestoreSelection;
+// The restored scene collection files exactly as they came out of the backup.
+static std::vector<obs_backuper::SceneCollectionFile> pendingRestoreScenes;
+static std::filesystem::path pendingRestoreDataDir;
 
 static void openBackupDialog()
 {
@@ -66,6 +71,38 @@ static void openBackupDialog()
 // nothing has "claimed" the
 // restored files in memory yet for OBS to later flush its own stale copy
 // back over them.
+// OBS read user.ini and global.ini into memory before any plugin loaded and
+// writes that memory back when it exits, which would silently undo the files a
+// restore just put in place (custom docks, dock layout, window settings).
+// Copy the restored values into the in-memory configs too. The profile and
+// scene collection are switched separately, and [General] holds install-specific
+// bookkeeping (version, install id, first-run flags) that must stay this
+// install's own.
+static void MergeRestoredConfigIntoMemory(const std::filesystem::path &obsDataDir)
+{
+	struct Target {
+		const char *file;
+		config_t *config;
+	};
+	const Target targets[] = {{"user.ini", obs_frontend_get_user_config()},
+				  {"global.ini", obs_frontend_get_app_config()}};
+
+	for (const auto &target : targets) {
+		if (target.config == nullptr)
+			continue;
+		int applied = 0;
+		for (const auto &entry : obs_backuper::ReadIniEntries(obsDataDir, target.file)) {
+			if (entry.section == "General" || entry.section == "Basic")
+				continue;
+			config_set_string(target.config, entry.section.c_str(), entry.key.c_str(), entry.value.c_str());
+			++applied;
+		}
+		if (applied > 0)
+			config_save_safe(target.config, "tmp", nullptr);
+		obs_log(LOG_INFO, "restored %d setting(s) from %s into the running OBS", applied, target.file);
+	}
+}
+
 static void CommitPendingRestoreIfAny()
 {
 	// A crash or kill mid-restore can leave a decrypted temporary archive
@@ -99,6 +136,9 @@ static void CommitPendingRestoreIfAny()
 
 	if (commit.success) {
 		pendingRestoreSelection = obs_backuper::ReadActiveSelection(marker.targetDir);
+		pendingRestoreScenes = obs_backuper::SnapshotSceneCollections(marker.targetDir);
+		pendingRestoreDataDir = marker.targetDir;
+		MergeRestoredConfigIntoMemory(marker.targetDir);
 		obs_log(LOG_INFO, "pending restore applied successfully");
 	} else if (commit.rolledBack) {
 		obs_log(LOG_ERROR, "pending restore failed and was rolled back: %s", commit.errorMessage.c_str());
@@ -128,6 +168,8 @@ static void SwitchToRestoredSelection()
 	const std::string profile = pendingRestoreSelection.profile;
 	const std::string collection = pendingRestoreSelection.sceneCollection;
 	pendingRestoreSelection = {};
+	const auto scenes = std::move(pendingRestoreScenes);
+	pendingRestoreScenes.clear();
 
 	if (!profile.empty()) {
 		char *current = obs_frontend_get_current_profile();
@@ -143,15 +185,35 @@ static void SwitchToRestoredSelection()
 	}
 
 	if (!collection.empty()) {
-		char *current = obs_frontend_get_current_scene_collection();
-		const bool differs = current == nullptr || collection != current;
-		bfree(current);
+		char *currentRaw = obs_frontend_get_current_scene_collection();
+		const std::string current = currentRaw != nullptr ? currentRaw : "";
+		bfree(currentRaw);
 		char **collections = obs_frontend_get_scene_collections();
 		const bool exists = ContainsName(collections, collection);
+		std::string other;
+		for (char **it = collections; it != nullptr && *it != nullptr; ++it) {
+			if (collection != *it) {
+				other = *it;
+				break;
+			}
+		}
 		bfree(collections);
-		if (differs && exists) {
+
+		if (exists && current != collection) {
 			obs_log(LOG_INFO, "switching to the restored scene collection \"%s\"", collection.c_str());
+			obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
 			obs_frontend_set_current_scene_collection(collection.c_str());
+		} else if (exists && !other.empty() && !scenes.empty()) {
+			// OBS loaded this collection while still on the wrong profile's canvas,
+			// rescaled it and saved it over the restored file. Step away (that save
+			// happens now), put the files back as the backup had them, and load
+			// the collection again on the right canvas.
+			obs_log(LOG_INFO, "reloading the restored scene collection \"%s\"", collection.c_str());
+			obs_frontend_set_current_scene_collection(other.c_str());
+			obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
+			obs_frontend_set_current_scene_collection(collection.c_str());
+			// Leaving `other` saved it too, possibly rescaled: fix that file as well.
+			obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
 		}
 	}
 }

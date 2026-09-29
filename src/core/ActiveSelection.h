@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace obs_backuper {
 
@@ -25,5 +26,19 @@ ActiveSelection ReadActiveSelection(const std::filesystem::path &obsDataDir);
 
 // Same, from the text of one ini file.
 ActiveSelection ParseActiveSelection(const std::string &iniText);
+
+// One "key=value" line of an ini file, with the [section] it sits in.
+struct IniEntry {
+	std::string section;
+	std::string key;
+	std::string value;
+};
+
+// Every key=value line of an ini text, in file order. Values are kept exactly
+// as written (a JSON value may contain "=" and quotes), minus the line end.
+std::vector<IniEntry> ParseIniEntries(const std::string &iniText);
+
+// The entries of <obsDataDir>/<fileName>; nothing if it cannot be read.
+std::vector<IniEntry> ReadIniEntries(const std::filesystem::path &obsDataDir, const std::string &fileName);
 
 } // namespace obs_backuper
