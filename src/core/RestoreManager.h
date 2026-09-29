@@ -140,6 +140,11 @@ public:
 							const std::filesystem::path &tempDir = {},
 							const ContainerProgressCallback &onDecryptProgress = {});
 
+	// Removes "*.bakeup-old"/"*.bakeup-new" files that replacing a plugin's files
+	// left under <targetDir>/plugins (a plugin library that was loaded at the
+	// time could only be renamed aside, not deleted). Call at startup.
+	static void RemovePluginReplacementLeftovers(const std::filesystem::path &targetDir);
+
 	// Deletes decrypted-archive temporaries a crash or kill left behind in
 	// dir (see RestoreOptions::password). Call at startup.
 	static void RemoveStaleTemporaryFiles(const std::filesystem::path &dir);

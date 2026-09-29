@@ -34,6 +34,10 @@ struct BackupOptions {
 	// "obs-backup_before-restore" for its automatic safety backups.
 	std::string archiveBaseNamePrefix = "obs-backup";
 
+	// Put obsVersion into the archive file name. RestoreManager turns this off
+	// for its safety backups, whose names are sorted to rotate the oldest ones.
+	bool appendObsVersionToFileName = true;
+
 	// Stage 7: non-empty = protect the backup with this password (UTF-8,
 	// already normalized by the caller). The archive is then built as a ZIP in
 	// a temporary file inside destinationDir, encrypted into
@@ -76,9 +80,13 @@ class BackupManager {
 public:
 	// Builds the base archive file name "<prefix>_YYYY-MM-DD_HHMM<extension>"
 	// from local time (extension: ".zip", or ".obsbak" for encrypted backups).
+	// A non-empty obsVersion is appended as "_OBS-<version>" before the
+	// extension, so it is visible which OBS version a backup was made with
+	// (characters that are unsafe in a file name are replaced by '-').
 	static std::string GenerateBackupBaseFileName(std::chrono::system_clock::time_point now,
 						       const std::string &prefix = "obs-backup",
-						       const std::string &extension = ".zip");
+						       const std::string &extension = ".zip",
+						       const std::string &obsVersion = {});
 
 	// Returns a path in destinationDir guaranteed not to collide with an
 	// existing file: on collision, appends a "_1", "_2", ... suffix before the

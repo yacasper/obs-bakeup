@@ -25,13 +25,17 @@ struct CollectionResult {
 // Sections of the obs-studio directory included in the backup by default.
 //
 // This is an allow-list, not a deny-list: any internal OBS directories/files
-// not on this list (logs, crashes, plugins, plugin_manager, profiler_data,
-// safe_mode, updates, .sentinel, .DS_Store, etc.) are automatically excluded from the
+// not on this list (logs, crashes, plugin_manager, profiler_data, safe_mode,
+// updates, .sentinel, .DS_Store, etc.) are automatically excluded from the
 // backup without needing to maintain an explicit deny-list that could go
-// stale as OBS is updated. Within the included sections themselves
-// (primarily plugin_config/**) there is no further filtering — priority is
-// given to maximum recoverability over archive size (e.g. obs-browser keeps
-// widget logins in its cookies/local storage, so its cache is kept too).
+// stale as OBS is updated. Within the included sections themselves there is
+// no further filtering -- priority is given to maximum recoverability over
+// archive size (e.g. obs-browser keeps widget logins in its cookies/local
+// storage, so its cache is kept too).
+//
+// "plugins" is the per-user plugin folder, so installed plugins are backed up
+// together with their settings (plugin_config). Plugins installed system-wide
+// (outside the obs-studio directory) are not covered.
 extern const std::vector<std::string> kDefaultIncludedTopLevelEntries;
 
 // Recursively walks rootDir, including only the top-level entries (files or

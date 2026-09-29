@@ -76,16 +76,31 @@ bool HasEnoughDiskSpace(const std::filesystem::path &dir, std::uintmax_t require
 	return true;
 }
 
+// Keeps letters, digits, '.', '+' and '-'; everything else becomes '-'.
+std::string SanitizeForFileName(const std::string &value)
+{
+	std::string out;
+	for (const char c : value) {
+		const bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.' ||
+				 c == '+' || c == '-';
+		out.push_back(ok ? c : '-');
+	}
+	return out;
+}
+
 } // namespace
 
 std::string BackupManager::GenerateBackupBaseFileName(std::chrono::system_clock::time_point now, const std::string &prefix,
-							  const std::string &extension)
+							  const std::string &extension, const std::string &obsVersion)
 {
 	const std::tm local = ToLocalTime(now);
 
-	return prefix + "_" + std::to_string(local.tm_year + 1900) + "-" + FormatTwoDigits(local.tm_mon + 1) + "-" +
-	       FormatTwoDigits(local.tm_mday) + "_" + FormatTwoDigits(local.tm_hour) + FormatTwoDigits(local.tm_min) +
-	       extension;
+	std::string name = prefix + "_" + std::to_string(local.tm_year + 1900) + "-" + FormatTwoDigits(local.tm_mon + 1) +
+			   "-" + FormatTwoDigits(local.tm_mday) + "_" + FormatTwoDigits(local.tm_hour) +
+			   FormatTwoDigits(local.tm_min);
+	if (!obsVersion.empty())
+		name += "_OBS-" + SanitizeForFileName(obsVersion);
+	return name + extension;
 }
 
 std::filesystem::path BackupManager::ResolveUniqueBackupPath(const std::filesystem::path &destinationDir,
@@ -132,7 +147,8 @@ BackupOutcome BackupManager::CreateBackup(const CollectionResult &collected, con
 
 	const auto now = std::chrono::system_clock::now();
 	const std::string baseFileName =
-		GenerateBackupBaseFileName(now, options.archiveBaseNamePrefix, encrypt ? ".obsbak" : ".zip");
+		GenerateBackupBaseFileName(now, options.archiveBaseNamePrefix, encrypt ? ".obsbak" : ".zip",
+				   options.appendObsVersionToFileName ? options.obsVersion : std::string());
 	const std::filesystem::path archivePath = ResolveUniqueBackupPath(options.destinationDir, baseFileName);
 
 	// Where the ZIP itself is built: the final path for a plain backup; for an

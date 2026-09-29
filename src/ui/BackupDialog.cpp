@@ -41,6 +41,7 @@
 #include <QSysInfo>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <filesystem>
 
 namespace {
@@ -468,6 +469,11 @@ void BackupDialog::onRestoreBackupClicked()
 				      .arg(FormatIsoLocal(manifest.createdAtIso8601))
 				      .arg(DisplayOsName(manifest.sourceOs))
 				      .arg(QString::fromStdString(manifest.obsVersion));
+
+	if (std::find(manifest.includedSections.begin(), manifest.includedSections.end(), "plugins") !=
+	    manifest.includedSections.end()) {
+		confirmText += "\n\n" + QString(obs_module_text("RestoreDialog.PluginsWarning"));
+	}
 
 	if (!manifest.sourceOs.empty() && manifest.sourceOs != currentOs) {
 		confirmText += "\n\n" + QString(obs_module_text("RestoreDialog.OsMismatchWarning"))

@@ -10,7 +10,7 @@
 namespace obs_backuper {
 
 const std::vector<std::string> kDefaultIncludedTopLevelEntries = {
-	"global.ini", "user.ini", "user.ini.bak", "basic", "plugin_config", "themes",
+	"global.ini", "user.ini", "user.ini.bak", "basic", "plugin_config", "plugins", "themes",
 };
 
 namespace {

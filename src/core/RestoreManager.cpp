@@ -54,24 +54,144 @@ bool ExtractWithRetries(const ZipReader &reader, const ZipReader::Entry &entry, 
 	return false;
 }
 
+std::string AsciiFold(std::string value);
+
+// Installed plugins live in "plugins/<name>..." inside the obs-studio
+// directory. Unlike settings they are executable code that OBS may already
+// have loaded (mapped into memory) when a restore is applied, so they are
+// never overwritten in place: overwriting a loaded library corrupts the
+// running process on macOS and is refused by the OS on Windows.
+constexpr const char *kPluginsDirName = "plugins";
+constexpr const char *kOwnPluginPrefix = "obs-backuper"; // this plugin's own folder/bundle
+constexpr const char *kReplacementNewSuffix = ".bakeup-new";
+constexpr const char *kReplacementOldSuffix = ".bakeup-old";
+constexpr const char *kRollbackTempSuffix = ".bakeup-rollback";
+
+std::string NthComponent(const std::filesystem::path &path, std::size_t index)
+{
+	auto it = path.begin();
+	for (std::size_t i = 0; i < index && it != path.end(); ++i)
+		++it;
+	return it == path.end() ? std::string() : AsciiFold(it->generic_u8string());
+}
+
+bool IsPluginPath(const std::filesystem::path &relativePath)
+{
+	return NthComponent(relativePath, 0) == kPluginsDirName && !NthComponent(relativePath, 1).empty();
+}
+
+// This plugin is running while a restore is applied, so its own files are
+// never touched: replacing them could crash the very code doing the restore.
+bool IsOwnPluginPath(const std::filesystem::path &relativePath)
+{
+	return IsPluginPath(relativePath) && NthComponent(relativePath, 1).rfind(kOwnPluginPrefix, 0) == 0;
+}
+
+bool FilesAreIdentical(const std::filesystem::path &a, const std::filesystem::path &b)
+{
+	std::error_code ec;
+	if (std::filesystem::file_size(a, ec) != std::filesystem::file_size(b, ec) || ec)
+		return false;
+
+	std::ifstream in1(a, std::ios::binary);
+	std::ifstream in2(b, std::ios::binary);
+	if (!in1.is_open() || !in2.is_open())
+		return false;
+
+	std::vector<char> buf1(64 * 1024);
+	std::vector<char> buf2(64 * 1024);
+	while (in1 && in2) {
+		in1.read(buf1.data(), static_cast<std::streamsize>(buf1.size()));
+		in2.read(buf2.data(), static_cast<std::streamsize>(buf2.size()));
+		if (in1.gcount() != in2.gcount() || !std::equal(buf1.begin(), buf1.begin() + in1.gcount(), buf2.begin()))
+			return false;
+	}
+	return true;
+}
+
+std::filesystem::path WithSuffix(const std::filesystem::path &path, const char *suffix)
+{
+	return std::filesystem::path(path.string() + suffix);
+}
+
+// Puts a copy of `source` at `destination` without ever modifying the
+// destination's existing file in place:
+//  - a destination with identical content is left alone (the usual case when
+//    restoring on the machine the backup came from, so nothing is written);
+//  - otherwise the new content is written next to it and renamed over it,
+//    which on macOS/Linux leaves anything that has the old file mapped
+//    untouched (it keeps the old inode);
+//  - if the rename is refused (Windows, library loaded), the old file is
+//    renamed aside instead -- Windows allows that for a loaded DLL -- and the
+//    new one takes its place. The "*.bakeup-old" file is removed on a later
+//    start (RemovePluginReplacementLeftovers).
+bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesystem::path &destination,
+		       std::string &errorMessage)
+{
+	std::error_code ec;
+	if (std::filesystem::exists(destination, ec) && FilesAreIdentical(source, destination))
+		return true;
+
+	const auto fresh = WithSuffix(destination, kReplacementNewSuffix);
+	std::filesystem::copy_file(source, fresh, std::filesystem::copy_options::overwrite_existing, ec);
+	if (ec) {
+		errorMessage = ec.message();
+		return false;
+	}
+
+	std::filesystem::rename(fresh, destination, ec);
+	if (!ec)
+		return true;
+
+	const auto old = WithSuffix(destination, kReplacementOldSuffix);
+	std::error_code asideEc;
+	std::filesystem::remove(old, asideEc);
+	std::filesystem::rename(destination, old, asideEc);
+	if (asideEc) {
+		errorMessage = asideEc.message();
+		std::filesystem::remove(fresh, asideEc);
+		return false;
+	}
+
+	std::error_code placeEc;
+	std::filesystem::rename(fresh, destination, placeEc);
+	if (placeEc) {
+		errorMessage = placeEc.message();
+		std::filesystem::rename(old, destination, asideEc); // put the original back
+		std::filesystem::remove(fresh, asideEc);
+		return false;
+	}
+	return true;
+}
+
 // Copies one file (already sitting on disk, e.g. in a staging directory) to
 // destDir, retrying a locked/unwritable destination file the same way
-// ExtractWithRetries does.
+// ExtractWithRetries does. Plugin files go through ReplaceFileSafely, and this
+// plugin's own files are skipped.
 bool CopyWithRetries(const std::filesystem::path &sourceFile, const std::filesystem::path &destDir,
 		      const std::filesystem::path &relativePath, int maxAttempts, int retryDelayMs,
 		      std::string &errorMessage)
 {
+	if (IsOwnPluginPath(relativePath))
+		return true;
+
 	const std::filesystem::path destination = destDir / relativePath;
 	std::error_code dirEc;
 	std::filesystem::create_directories(destination.parent_path(), dirEc);
 
+	const bool isPlugin = IsPluginPath(relativePath);
 	for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
-		std::error_code copyEc;
-		if (std::filesystem::copy_file(sourceFile, destination, std::filesystem::copy_options::overwrite_existing,
-						copyEc))
-			return true;
+		if (isPlugin) {
+			if (ReplaceFileSafely(sourceFile, destination, errorMessage))
+				return true;
+		} else {
+			std::error_code copyEc;
+			if (std::filesystem::copy_file(sourceFile, destination,
+							std::filesystem::copy_options::overwrite_existing, copyEc))
+				return true;
+			errorMessage = copyEc.message();
+		}
 
-		errorMessage = copyEc.message();
 		if (attempt < maxAttempts)
 			std::this_thread::sleep_for(std::chrono::milliseconds(retryDelayMs));
 	}
@@ -190,8 +310,21 @@ void RollbackFromSafetyBackup(const std::filesystem::path &safetyBackupPath, con
 		if (IsManifestEntry(entry.relativePath))
 			continue;
 
+		if (IsOwnPluginPath(entry.relativePath))
+			continue; // never touched by the restore, see CopyWithRetries
+
 		std::string extractError;
-		reader.ExtractEntryToFile(entry.relativePath.generic_u8string(), targetDir / entry.relativePath, extractError);
+		const std::filesystem::path destination = targetDir / entry.relativePath;
+		if (IsPluginPath(entry.relativePath)) {
+			// Never overwrite a possibly loaded plugin in place.
+			const auto temp = WithSuffix(destination, kRollbackTempSuffix);
+			if (reader.ExtractEntryToFile(entry.relativePath.generic_u8string(), temp, extractError))
+				ReplaceFileSafely(temp, destination, extractError);
+			std::error_code removeEc;
+			std::filesystem::remove(temp, removeEc);
+			continue;
+		}
+		reader.ExtractEntryToFile(entry.relativePath.generic_u8string(), destination, extractError);
 	}
 
 	RemoveFilesAddedByRestore(entries, targetDir, restoredPaths);
@@ -241,6 +374,7 @@ std::filesystem::path CreateSafetyBackup(const RestoreOptions &options, std::str
 	safetyOptions.sourceOs = options.sourceOs;
 	safetyOptions.sourceOsVersion = options.sourceOsVersion;
 	safetyOptions.archiveBaseNamePrefix = kSafetyBackupPrefix;
+	safetyOptions.appendObsVersionToFileName = false;
 
 	const auto collectedCurrentConfig = CollectFiles(options.targetDir);
 	const auto safetyOutcome = BackupManager::CreateBackup(collectedCurrentConfig, safetyOptions, options.onSafetyBackupProgress);
@@ -379,6 +513,36 @@ void RestoreManager::RemoveStaleTemporaryFiles(const std::filesystem::path &dir)
 			std::error_code removeEc;
 			std::filesystem::remove(entry.path(), removeEc);
 		}
+	}
+}
+
+void RestoreManager::RemovePluginReplacementLeftovers(const std::filesystem::path &targetDir)
+{
+	std::error_code ec;
+	const auto pluginsDir = targetDir / kPluginsDirName;
+	if (!std::filesystem::is_directory(pluginsDir, ec))
+		return;
+
+	std::filesystem::recursive_directory_iterator it(
+		pluginsDir, std::filesystem::directory_options::skip_permission_denied, ec);
+	const std::filesystem::recursive_directory_iterator end;
+	std::vector<std::filesystem::path> leftovers;
+	for (; !ec && it != end; it.increment(ec)) {
+		std::error_code fileEc;
+		if (!it->is_regular_file(fileEc) || fileEc)
+			continue;
+		const std::string name = it->path().filename().string();
+		for (const char *suffix : {kReplacementOldSuffix, kReplacementNewSuffix, kRollbackTempSuffix}) {
+			const std::string s = suffix;
+			if (name.size() > s.size() && name.compare(name.size() - s.size(), std::string::npos, s) == 0) {
+				leftovers.push_back(it->path());
+				break;
+			}
+		}
+	}
+	for (const auto &path : leftovers) {
+		std::error_code removeEc;
+		std::filesystem::remove(path, removeEc);
 	}
 }
 

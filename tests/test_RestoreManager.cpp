@@ -549,3 +549,197 @@ TEST_CASE("RemovePendingRestoreMarker deletes the marker file if present, and is
 	// Calling it again with nothing there must not throw/crash.
 	RestoreManager::RemovePendingRestoreMarker(markerPath);
 }
+
+// ---------------------------------------------------------------------------
+// Installed plugins (plugins/<name>...) are executable code that OBS may have
+// loaded already, so a restore must never overwrite them in place.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("CommitStagedRestore installs new and changed plugin files", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	const auto targetDir = fixture.root / "obs-studio";
+
+	WriteFile(stagingDir / "plugins" / "new.plugin" / "Contents" / "MacOS" / "new", "NEW-BINARY");
+	WriteFile(stagingDir / "plugins" / "old.plugin" / "Contents" / "MacOS" / "old", "UPDATED-BINARY");
+	WriteFile(targetDir / "plugins" / "old.plugin" / "Contents" / "MacOS" / "old", "OLD-BINARY");
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+
+	REQUIRE(commit.success);
+	CHECK(ReadFile(targetDir / "plugins" / "new.plugin" / "Contents" / "MacOS" / "new") == "NEW-BINARY");
+	CHECK(ReadFile(targetDir / "plugins" / "old.plugin" / "Contents" / "MacOS" / "old") == "UPDATED-BINARY");
+
+	// No temporary files are left behind next to the plugin.
+	for (const auto &entry : std::filesystem::recursive_directory_iterator(targetDir / "plugins"))
+		CHECK(entry.path().filename().string().find(".bakeup-") == std::string::npos);
+}
+
+TEST_CASE("CommitStagedRestore leaves an identical plugin file untouched", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	const auto targetDir = fixture.root / "obs-studio";
+
+	WriteFile(stagingDir / "plugins" / "p.plugin" / "lib", "SAME-CONTENT");
+	const auto existing = WriteFile(targetDir / "plugins" / "p.plugin" / "lib", "SAME-CONTENT");
+	const auto longAgo = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24 * 365);
+	std::filesystem::last_write_time(existing, longAgo);
+	const auto before = std::filesystem::last_write_time(existing);
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+
+	REQUIRE(commit.success);
+	CHECK(ReadFile(existing) == "SAME-CONTENT");
+	// Not rewritten: a loaded library must not be touched when nothing changed.
+	CHECK(std::filesystem::last_write_time(existing) == before);
+}
+
+TEST_CASE("CommitStagedRestore never touches this plugin's own files", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	const auto targetDir = fixture.root / "obs-studio";
+
+	// macOS bundle and Windows folder spellings.
+	WriteFile(stagingDir / "plugins" / "obs-backuper.plugin" / "Contents" / "MacOS" / "obs-backuper", "OLDER-BUILD");
+	WriteFile(stagingDir / "plugins" / "obs-backuper" / "bin" / "64bit" / "obs-backuper.dll", "OLDER-BUILD");
+	WriteFile(stagingDir / "plugins" / "other.plugin" / "lib", "OTHER-NEW");
+	const auto ownMac = WriteFile(targetDir / "plugins" / "obs-backuper.plugin" / "Contents" / "MacOS" / "obs-backuper",
+				      "RUNNING-BUILD");
+	const auto ownWin =
+		WriteFile(targetDir / "plugins" / "obs-backuper" / "bin" / "64bit" / "obs-backuper.dll", "RUNNING-BUILD");
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+
+	REQUIRE(commit.success);
+	CHECK(ReadFile(ownMac) == "RUNNING-BUILD");
+	CHECK(ReadFile(ownWin) == "RUNNING-BUILD");
+	CHECK(ReadFile(targetDir / "plugins" / "other.plugin" / "lib") == "OTHER-NEW");
+}
+
+TEST_CASE("Only files inside plugins/ get plugin treatment", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	const auto targetDir = fixture.root / "obs-studio";
+
+	// The plugin's own settings folder is not its "plugins/" folder: ordinary file.
+	WriteFile(stagingDir / "plugin_config" / "obs-backuper" / "settings.json", "NEW");
+	WriteFile(targetDir / "plugin_config" / "obs-backuper" / "settings.json", "OLD");
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+
+	REQUIRE(commit.success);
+	CHECK(ReadFile(targetDir / "plugin_config" / "obs-backuper" / "settings.json") == "NEW");
+}
+
+#ifndef _WIN32
+TEST_CASE("Replacing a plugin file leaves a copy that is already open untouched", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	const auto targetDir = fixture.root / "obs-studio";
+
+	WriteFile(stagingDir / "plugins" / "p.plugin" / "lib", "NEW-BINARY-CONTENT");
+	const auto lib = WriteFile(targetDir / "plugins" / "p.plugin" / "lib", "OLD-BINARY-CONTENT");
+
+	// Stands in for OBS having the library loaded (mapped): the restore must
+	// not modify the file this handle refers to.
+	std::ifstream loaded(lib, std::ios::binary);
+	REQUIRE(loaded.is_open());
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+	REQUIRE(commit.success);
+
+	CHECK(ReadFile(lib) == "NEW-BINARY-CONTENT");
+	const std::string stillOld((std::istreambuf_iterator<char>(loaded)), std::istreambuf_iterator<char>());
+	CHECK(stillOld == "OLD-BINARY-CONTENT");
+}
+
+TEST_CASE("A failed restore puts plugin files back without leaving temporary files", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+
+	// The safety backup holds the plugin as it was before the restore.
+	CollectionResult safety;
+	const auto pluginFile = WriteFile(fixture.root / "before" / "plugins" / "p.plugin" / "lib", "ORIGINAL");
+	const auto sceneFile = WriteFile(fixture.root / "before" / "basic" / "scenes" / "Record.json", R"({"scene":"old"})");
+	safety.files = {
+		{std::filesystem::path("plugins") / "p.plugin" / "lib", pluginFile, std::filesystem::file_size(pluginFile)},
+		{std::filesystem::path("basic") / "scenes" / "Record.json", sceneFile, std::filesystem::file_size(sceneFile)},
+	};
+	safety.totalSizeBytes = safety.files[0].sizeBytes + safety.files[1].sizeBytes;
+	BackupOptions backupOptions;
+	backupOptions.destinationDir = fixture.root / "safety";
+	backupOptions.pluginVersion = "1.0.0";
+	backupOptions.obsVersion = "32.2.2";
+	backupOptions.sourceOs = "macos";
+	const auto safetyOutcome = BackupManager::CreateBackup(safety, backupOptions);
+	REQUIRE(safetyOutcome.success);
+
+	const auto stagingDir = fixture.root / "staging";
+	WriteFile(stagingDir / "plugins" / "p.plugin" / "lib", "FROM-BACKUP");
+	WriteFile(stagingDir / "basic" / "scenes" / "Record.json", R"({"scene":"new"})");
+
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto lib = WriteFile(targetDir / "plugins" / "p.plugin" / "lib", "ORIGINAL");
+	const auto lockedFile = WriteFile(targetDir / "basic" / "scenes" / "Record.json", R"({"scene":"old"})");
+	std::filesystem::permissions(lockedFile, std::filesystem::perms::owner_read, std::filesystem::perm_options::replace);
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, safetyOutcome.archivePath, 2, 1);
+
+	std::filesystem::permissions(lockedFile, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+
+	CHECK_FALSE(commit.success);
+	CHECK(commit.rolledBack);
+	CHECK(ReadFile(lib) == "ORIGINAL");
+	for (const auto &entry : std::filesystem::recursive_directory_iterator(targetDir / "plugins"))
+		CHECK(entry.path().filename().string().find(".bakeup-") == std::string::npos);
+}
+#endif
+
+TEST_CASE("RemovePluginReplacementLeftovers deletes only the temporary plugin files", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto targetDir = fixture.root / "obs-studio";
+
+	const auto keepLib = WriteFile(targetDir / "plugins" / "p" / "lib.dll", "keep");
+	const auto keepOther = WriteFile(targetDir / "plugin_config" / "p" / "cfg.bakeup-old", "outside plugins/: keep");
+	const auto oldFile = WriteFile(targetDir / "plugins" / "p" / "lib.dll.bakeup-old", "x");
+	const auto newFile = WriteFile(targetDir / "plugins" / "p" / "bin" / "a.dll.bakeup-new", "x");
+	const auto rollbackFile = WriteFile(targetDir / "plugins" / "q" / "b.so.bakeup-rollback", "x");
+
+	RestoreManager::RemovePluginReplacementLeftovers(targetDir);
+
+	CHECK(std::filesystem::exists(keepLib));
+	CHECK(std::filesystem::exists(keepOther));
+	CHECK_FALSE(std::filesystem::exists(oldFile));
+	CHECK_FALSE(std::filesystem::exists(newFile));
+	CHECK_FALSE(std::filesystem::exists(rollbackFile));
+}
+
+TEST_CASE("RemovePluginReplacementLeftovers is a no-op without a plugins folder", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	RestoreManager::RemovePluginReplacementLeftovers(fixture.root / "does-not-exist");
+	RestoreManager::RemovePluginReplacementLeftovers(fixture.root);
+	SUCCEED();
+}
+
+TEST_CASE("Safety backups keep their sortable name and do not carry the OBS version", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto archivePath = BuildValidArchive(fixture.root / "backups", fixture.root / "source");
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=OLD\n");
+
+	auto options = MakeRestoreOptions(archivePath, targetDir, fixture.root / "safety");
+	const auto outcome = RestoreManager::PerformRestore(options);
+	REQUIRE(outcome.success);
+
+	const std::string name = outcome.safetyBackupPath.filename().string();
+	CHECK(name.rfind("obs-backup_before-restore_", 0) == 0);
+	CHECK(name.find("OBS-") == std::string::npos);
+}

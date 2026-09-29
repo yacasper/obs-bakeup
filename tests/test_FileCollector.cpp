@@ -29,6 +29,9 @@ public:
 		WriteFile(root / "basic" / "scenes" / "Record.json", "{}");
 
 		WriteFile(root / "plugin_config" / "obs-websocket" / "config.json", "{}");
+		// Installed plugins are backed up whole, together with their settings.
+		WriteFile(root / "plugins" / "some-plugin.plugin" / "Contents" / "Info.plist", "binary-plugin");
+		WriteFile(root / "plugins" / "some-plugin.plugin" / "Contents" / "MacOS" / "some-plugin", "machine-code");
 		// plugin_config/obs-browser is intentionally copied whole, including its
 		// cache: recoverability takes priority over size.
 		WriteFile(root / "plugin_config" / "obs-browser" / "Cache" / "data_0", "binarycache");
@@ -36,7 +39,7 @@ public:
 		// Sections that must NOT end up in the backup by default.
 		WriteFile(root / "logs" / "2026-09-28.txt", "log line");
 		WriteFile(root / "crashes" / "crash.dmp", "crash");
-		WriteFile(root / "plugins" / "some-plugin.plugin" / "Contents" / "Info.plist", "binary-plugin");
+		WriteFile(root / "plugin_manager" / "state.json", "{}");
 		WriteFile(root / "profiler_data" / "session.bin", "profiler");
 		WriteFile(root / ".DS_Store", "junk");
 	}
@@ -90,12 +93,19 @@ TEST_CASE("CollectFiles includes only the allow-listed top-level sections", "[Fi
 			result, std::filesystem::path("plugin_config") / "obs-browser" / "Cache" / "data_0"));
 	}
 
+	SECTION("installed plugins are included whole, not just their settings")
+	{
+		CHECK(ContainsRelativePath(
+			result, std::filesystem::path("plugins") / "some-plugin.plugin" / "Contents" / "Info.plist"));
+		CHECK(ContainsRelativePath(result, std::filesystem::path("plugins") / "some-plugin.plugin" / "Contents" /
+							     "MacOS" / "some-plugin"));
+	}
+
 	SECTION("diagnostic and internal OBS state are excluded by default")
 	{
 		CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("logs") / "2026-09-28.txt"));
 		CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("crashes") / "crash.dmp"));
-		CHECK_FALSE(ContainsRelativePath(
-			result, std::filesystem::path("plugins") / "some-plugin.plugin" / "Contents" / "Info.plist"));
+		CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("plugin_manager") / "state.json"));
 		CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("profiler_data") / "session.bin"));
 		CHECK_FALSE(ContainsRelativePath(result, ".DS_Store"));
 	}

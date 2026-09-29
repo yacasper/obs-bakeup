@@ -67,6 +67,9 @@ static void CommitPendingRestoreIfAny()
 	// A crash or kill mid-restore can leave a decrypted temporary archive
 	// behind; never let plaintext outlive the operation that made it.
 	obs_backuper::RestoreManager::RemoveStaleTemporaryFiles(obs_backuper::GetSafetyBackupDir());
+	// Files a previous restore had to rename aside while replacing plugins that
+	// were loaded at the time.
+	obs_backuper::RestoreManager::RemovePluginReplacementLeftovers(obs_backuper::GetObsDataDir());
 
 	const auto markerPath = obs_backuper::GetSafetyBackupDir() / "pending-restore.marker";
 

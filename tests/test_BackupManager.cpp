@@ -87,6 +87,62 @@ TEST_CASE("GenerateBackupBaseFileName produces the expected pattern", "[BackupMa
 	CHECK(std::regex_match(name, pattern));
 }
 
+TEST_CASE("GenerateBackupBaseFileName puts the OBS version before the extension", "[BackupManager]")
+{
+	const auto now = std::chrono::system_clock::now();
+
+	const std::string zip = BackupManager::GenerateBackupBaseFileName(now, "obs-backup", ".zip", "32.2.2");
+	static const std::regex zipPattern(R"(^obs-backup_\d{4}-\d{2}-\d{2}_\d{4}_OBS-32\.2\.2\.zip$)");
+	CHECK(std::regex_match(zip, zipPattern));
+
+	const std::string encrypted = BackupManager::GenerateBackupBaseFileName(now, "obs-backup", ".obsbak", "31.1.1");
+	CHECK(encrypted.size() > 6);
+	CHECK(encrypted.find("_OBS-31.1.1.obsbak") == encrypted.size() - std::string("_OBS-31.1.1.obsbak").size());
+
+	// Nothing is added when the version is unknown.
+	CHECK(BackupManager::GenerateBackupBaseFileName(now, "obs-backup", ".zip", "") ==
+	      BackupManager::GenerateBackupBaseFileName(now));
+}
+
+TEST_CASE("GenerateBackupBaseFileName keeps the OBS version safe for a file name", "[BackupManager]")
+{
+	const std::string name = BackupManager::GenerateBackupBaseFileName(std::chrono::system_clock::now(), "obs-backup",
+									     ".zip", "32.0/beta 1:x\\y");
+
+	CHECK(name.find("_OBS-32.0-beta-1-x-y.zip") != std::string::npos);
+	CHECK(name.find('/') == std::string::npos);
+	CHECK(name.find('\\') == std::string::npos);
+	CHECK(name.find(':') == std::string::npos);
+	CHECK(name.find(' ') == std::string::npos);
+}
+
+TEST_CASE("CreateBackup names the archive after the OBS version it was made with", "[BackupManager]")
+{
+	TempDirFixture fixture;
+	CollectionResult collected;
+	const auto file = WriteFile(fixture.root / "src" / "global.ini", "size=1");
+	collected.files = {{"global.ini", file, std::filesystem::file_size(file)}};
+	collected.totalSizeBytes = collected.files[0].sizeBytes;
+
+	auto options = MakeOptions(fixture.root / "out");
+	options.obsVersion = "32.2.2";
+
+	SECTION("by default")
+	{
+		const auto outcome = BackupManager::CreateBackup(collected, options);
+		REQUIRE(outcome.success);
+		CHECK(outcome.archivePath.filename().string().find("_OBS-32.2.2.zip") != std::string::npos);
+	}
+
+	SECTION("unless turned off")
+	{
+		options.appendObsVersionToFileName = false;
+		const auto outcome = BackupManager::CreateBackup(collected, options);
+		REQUIRE(outcome.success);
+		CHECK(outcome.archivePath.filename().string().find("OBS-") == std::string::npos);
+	}
+}
+
 TEST_CASE("ResolveUniqueBackupPath returns the base name when nothing collides", "[BackupManager]")
 {
 	TempDirFixture fixture;
