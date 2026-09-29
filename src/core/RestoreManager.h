@@ -120,6 +120,12 @@ struct CommitOutcome {
 	// automatically restored from safetyBackupPath.
 	bool rolledBack = false;
 
+	// Files that could not be replaced and were left as they were, because they
+	// belong to the embedded browser, which keeps them open while OBS shuts
+	// down and can rebuild or re-fetch them. Everything else failing still
+	// fails (and rolls back) the whole restore.
+	int filesSkipped = 0;
+	std::string firstSkippedMessage;
 };
 
 // Everything CommitStagedRestore needs, persisted to disk by the UI layer

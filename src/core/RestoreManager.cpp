@@ -259,6 +259,13 @@ bool PlaceFileWithRetries(const std::filesystem::path &source, const std::filesy
 // destDir, retrying a locked/unwritable destination file the same way
 // ExtractWithRetries does. Plugin files go through ReplaceFileSafely, and this
 // plugin's own files are skipped.
+// plugin_config/obs-browser/...: the embedded browser's own files. It holds some
+// of them open (even memory-mapped) until the process is gone.
+bool IsBrowserDataPath(const std::filesystem::path &relativePath)
+{
+	return NthComponent(relativePath, 0) == "plugin_config" && NthComponent(relativePath, 1) == "obs-browser";
+}
+
 bool CopyWithRetries(const std::filesystem::path &sourceFile, const std::filesystem::path &destDir,
 		      const std::filesystem::path &relativePath, int maxAttempts, int retryDelayMs,
 		      std::string &errorMessage)
@@ -881,6 +888,12 @@ CommitOutcome RestoreManager::CommitStagedRestore(const std::filesystem::path &s
 		std::string copyError;
 		if (!CopyWithRetries(file.absolutePath, targetDir, file.relativePath, fileWriteMaxAttempts,
 				      fileWriteRetryDelayMs, copyError)) {
+			if (IsBrowserDataPath(file.relativePath)) {
+				if (outcome.filesSkipped == 0)
+					outcome.firstSkippedMessage = GenericPathToUtf8(file.relativePath) + ": " + copyError;
+				++outcome.filesSkipped;
+				continue;
+			}
 			outcome.errorMessage = "failed to apply staged restore for \"" + GenericPathToUtf8(file.relativePath) +
 						"\": " + copyError;
 			outcome.errorKind = ErrorKind::RestoreApplyFailed;

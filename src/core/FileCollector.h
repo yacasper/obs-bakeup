@@ -54,6 +54,13 @@ inline constexpr const char *kProgramPluginsDataPrefix = "program-plugins-data";
 // files with old ones; every other file there is a third-party plugin.
 const std::vector<std::string> &ObsShippedPluginStems();
 
+// Disk caches the embedded browser (obs-browser) rebuilds by itself, plus the
+// files it keeps open while OBS runs. They are large, worthless in a backup and
+// the ones that cannot be written back on restore. Logins (cookies, local
+// storage) are not among them. `pathInsideObsDir` is relative to the obs-studio
+// folder.
+bool IsDisposableBrowserData(const std::filesystem::path &pathInsideObsDir);
+
 // True if an archive path lies under one of the plugin-root prefixes above.
 bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath);
 

@@ -31,9 +31,24 @@ bool IsJunkFile(const std::filesystem::path &path)
 	return path.filename() == ".DS_Store";
 }
 
+std::string FoldedComponent(const std::filesystem::path &path, std::size_t index)
+{
+	auto it = path.begin();
+	for (std::size_t i = 0; i < index && it != path.end(); ++i)
+		++it;
+	std::string name = it == path.end() ? std::string() : PathToUtf8(*it);
+	for (char &c : name) {
+		if (c >= 'A' && c <= 'Z')
+			c = static_cast<char>(c - 'A' + 'a');
+	}
+	return name;
+}
+
 void AddFile(const std::filesystem::path &rootDir, const std::filesystem::path &filePath, std::uintmax_t sizeBytes,
 	     CollectionResult &result)
 {
+	if (IsDisposableBrowserData(std::filesystem::relative(filePath, rootDir)))
+		return;
 	result.files.push_back({std::filesystem::relative(filePath, rootDir), filePath, sizeBytes});
 	result.totalSizeBytes += sizeBytes;
 }
@@ -92,6 +107,23 @@ bool IsExcludedByStem(const PluginRoot &root, const std::filesystem::path &relat
 }
 
 } // namespace
+
+bool IsDisposableBrowserData(const std::filesystem::path &pathInsideObsDir)
+{
+	if (FoldedComponent(pathInsideObsDir, 0) != "plugin_config" || FoldedComponent(pathInsideObsDir, 1) != "obs-browser")
+		return false;
+
+	static const char *const kDisposable[] = {"cache",         "code cache",         "gpucache",
+						  "dawncache",     "dawngraphitecache",  "dawnwebgpucache",
+						  "grshadercache", "graphitedawncache",  "shadercache",
+						  "crashpad",      "first_party_sets.db", "first_party_sets.db-journal"};
+	const std::string name = FoldedComponent(pathInsideObsDir, 2);
+	for (const char *disposable : kDisposable) {
+		if (name == disposable)
+			return true;
+	}
+	return false;
+}
 
 bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath)
 {

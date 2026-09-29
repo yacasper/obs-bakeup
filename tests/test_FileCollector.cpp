@@ -93,10 +93,12 @@ TEST_CASE("CollectFiles includes only the allow-listed top-level sections", "[Fi
 	CHECK(ContainsRelativePath(result,
 				    std::filesystem::path("plugin_config") / "obs-websocket" / "config.json"));
 
-	SECTION("plugin_config is copied whole, including browser cache — restorability over size")
+	SECTION("plugin_config is copied, but the browser's disposable cache is not")
 	{
-		CHECK(ContainsRelativePath(
+		CHECK_FALSE(ContainsRelativePath(
 			result, std::filesystem::path("plugin_config") / "obs-browser" / "Cache" / "data_0"));
+		CHECK(ContainsRelativePath(result,
+					    std::filesystem::path("plugin_config") / "obs-websocket" / "config.json"));
 	}
 
 	SECTION("installed plugins are included whole, not just their settings")
@@ -249,6 +251,42 @@ TEST_CASE("The OBS-shipped list names OBS's own plugins and not third-party ones
 		CHECK(stem.find('.') == std::string::npos);
 		CHECK(std::none_of(stem.begin(), stem.end(), [](char c) { return c >= 'A' && c <= 'Z'; }));
 	}
+}
+
+TEST_CASE("IsDisposableBrowserData names the browser's caches and locked databases, not its logins",
+	  "[FileCollector]")
+{
+	namespace fs = std::filesystem;
+	const fs::path browser = fs::path("plugin_config") / "obs-browser";
+
+	CHECK(IsDisposableBrowserData(browser / "Cache" / "Cache_Data" / "f_000001"));
+	CHECK(IsDisposableBrowserData(browser / "Code Cache" / "js" / "index"));
+	CHECK(IsDisposableBrowserData(browser / "GPUCache" / "data_0"));
+	CHECK(IsDisposableBrowserData(browser / "GrShaderCache" / "x"));
+	CHECK(IsDisposableBrowserData(browser / "first_party_sets.db"));
+	CHECK(IsDisposableBrowserData(fs::path("Plugin_Config") / "OBS-Browser" / "CACHE" / "x"));
+
+	CHECK_FALSE(IsDisposableBrowserData(browser / "Cookies"));
+	CHECK_FALSE(IsDisposableBrowserData(browser / "Local Storage" / "leveldb" / "000003.log"));
+	CHECK_FALSE(IsDisposableBrowserData(browser / "Network" / "Cookies"));
+	CHECK_FALSE(IsDisposableBrowserData(fs::path("plugin_config") / "other" / "Cache" / "x"));
+	CHECK_FALSE(IsDisposableBrowserData(fs::path("basic") / "Cache"));
+	CHECK_FALSE(IsDisposableBrowserData(fs::path()));
+}
+
+TEST_CASE("CollectFiles leaves the embedded browser's caches out of the backup", "[FileCollector]")
+{
+	ObsDirFixture obs;
+	WritePluginFile(obs.root / "plugin_config" / "obs-browser" / "Cache" / "Cache_Data" / "f_000001", "cache");
+	WritePluginFile(obs.root / "plugin_config" / "obs-browser" / "first_party_sets.db", "db");
+	WritePluginFile(obs.root / "plugin_config" / "obs-browser" / "Cookies", "logins");
+
+	const auto result = CollectFiles(obs.root);
+
+	const auto browser = std::filesystem::path("plugin_config") / "obs-browser";
+	CHECK(ContainsRelativePath(result, browser / "Cookies"));
+	CHECK_FALSE(ContainsRelativePath(result, browser / "first_party_sets.db"));
+	CHECK_FALSE(ContainsRelativePath(result, browser / "Cache" / "Cache_Data" / "f_000001"));
 }
 
 TEST_CASE("Program-folder plugin prefixes count as plugin-root entries", "[FileCollector][pluginroot]")

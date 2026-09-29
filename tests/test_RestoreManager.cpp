@@ -399,6 +399,83 @@ TEST_CASE("CommitStagedRestore rolls back from the safety backup when a copy fai
 }
 #endif
 
+TEST_CASE("CommitStagedRestore ignores disposable browser cache found in an older backup",
+	  "[RestoreManager][staged]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	WriteFile(stagingDir / "plugin_config" / "obs-browser" / "Cache" / "Cache_Data" / "f_000001", "CACHE");
+	WriteFile(stagingDir / "plugin_config" / "obs-browser" / "first_party_sets.db", "DB");
+	WriteFile(stagingDir / "plugin_config" / "obs-browser" / "Cookies", "LOGINS");
+
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+
+	REQUIRE(commit.success);
+	CHECK(commit.filesSkipped == 0);
+	CHECK(ReadFile(targetDir / "plugin_config" / "obs-browser" / "Cookies") == "LOGINS");
+	CHECK_FALSE(std::filesystem::exists(targetDir / "plugin_config" / "obs-browser" / "first_party_sets.db"));
+	CHECK_FALSE(std::filesystem::exists(targetDir / "plugin_config" / "obs-browser" / "Cache"));
+}
+
+#ifndef _WIN32
+TEST_CASE("CommitStagedRestore leaves a locked embedded-browser file alone and restores the rest",
+	  "[RestoreManager][staged]")
+{
+	TempDirFixture fixture;
+	const auto archivePath = BuildValidArchive(fixture.root / "backups", fixture.root / "safety-source", "size=OLD\n");
+
+	const auto stagingDir = fixture.root / "staging";
+	WriteFile(stagingDir / "global.ini", "size=NEW\n");
+	WriteFile(stagingDir / "plugin_config" / "obs-browser" / "Cookies", "NEW-COOKIES");
+	WriteFile(stagingDir / "plugin_config" / "obs-browser" / "Local Storage" / "leveldb" / "000003.log", "NEW-LOG");
+	WriteFile(stagingDir / "basic" / "scenes" / "Live.json", R"({"scene":"new"})");
+
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=OLD\n");
+	const auto lockedDb =
+		WriteFile(targetDir / "plugin_config" / "obs-browser" / "Local Storage" / "leveldb" / "000003.log", "OLD-DB");
+	std::filesystem::permissions(lockedDb, std::filesystem::perms::owner_read, std::filesystem::perm_options::replace);
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, archivePath, 2, 1);
+
+	std::filesystem::permissions(lockedDb, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+
+	CHECK(commit.success);
+	CHECK_FALSE(commit.rolledBack);
+	CHECK(commit.filesSkipped == 1);
+	CHECK(commit.firstSkippedMessage.find("000003.log") != std::string::npos);
+	CHECK(ReadFile(lockedDb) == "OLD-DB");
+	CHECK(ReadFile(targetDir / "global.ini") == "size=NEW\n");
+	CHECK(ReadFile(targetDir / "plugin_config" / "obs-browser" / "Cookies") == "NEW-COOKIES");
+	CHECK(ReadFile(targetDir / "basic" / "scenes" / "Live.json") == R"({"scene":"new"})");
+}
+
+TEST_CASE("CommitStagedRestore still fails on a locked file outside the embedded browser's folder",
+	  "[RestoreManager][staged]")
+{
+	TempDirFixture fixture;
+	const auto archivePath = BuildValidArchive(fixture.root / "backups", fixture.root / "safety-source", "size=OLD\n");
+
+	const auto stagingDir = fixture.root / "staging";
+	WriteFile(stagingDir / "plugin_config" / "other-plugin" / "state.db", "NEW");
+
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto locked = WriteFile(targetDir / "plugin_config" / "other-plugin" / "state.db", "OLD");
+	std::filesystem::permissions(locked, std::filesystem::perms::owner_read, std::filesystem::perm_options::replace);
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, archivePath, 2, 1);
+
+	std::error_code ignored; // the rollback removes a file the safety backup never had
+	std::filesystem::permissions(locked, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
+				     ignored);
+
+	CHECK_FALSE(commit.success);
+	CHECK(commit.rolledBack);
+	CHECK(commit.filesSkipped == 0);
+}
+#endif
+
 #ifndef _WIN32
 TEST_CASE("CommitStagedRestore's rollback deletes files the restore added, and only those", "[RestoreManager][staged]")
 {

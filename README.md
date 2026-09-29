@@ -21,7 +21,7 @@ Open it from **Tools → OBS Bakeup**.
 | Global and user settings (`global.ini`, `user.ini`) | Logs |
 | Profiles and scene collections (`basic/`) | Crash reports |
 | Installed plugins: on macOS the `plugins/` folder of your OBS folder; on Windows `%ProgramData%\obs-studio\plugins` (`<OBS folder>\plugins` in portable mode) **and** third-party plugins installed the classic way into OBS's program folder (`obs-plugins` and `data\obs-plugins`, next to `obs64.exe`) | Anything else OBS keeps internally (caches, temp files) |
-| Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins) | The plugins and helper files that ship with OBS itself (`obs-ffmpeg`, `win-capture`, `obs-browser` and so on): they belong to one exact OBS version |
+| Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins; not the browser's disk caches, which it rebuilds itself) | The plugins and helper files that ship with OBS itself (`obs-ffmpeg`, `win-capture`, `obs-browser` and so on): they belong to one exact OBS version |
 | Themes | Your own files outside the OBS folder: images, videos, audio, fonts, recordings and other media that scenes use |
 
 > 🖼️ **Media files are not part of a backup.** Scenes refer to images, videos and other files by their path on disk, so after restoring on a new computer copy those files back to the same locations, or re-link them in the affected sources.

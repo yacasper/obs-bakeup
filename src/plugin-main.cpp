@@ -142,7 +142,10 @@ static bool CommitPendingRestore(obs_backuper::PendingRestoreMarker &marker, obs
 								     marker.fileWriteRetryDelayMs);
 	obs_backuper::RestoreManager::RemovePendingRestoreMarker(PendingMarkerPath());
 
-	if (commit.success)
+	if (commit.success && commit.filesSkipped > 0)
+		obs_log(LOG_WARNING, "pending restore applied; %d browser file(s) were in use and left as they were, first: %s",
+			commit.filesSkipped, commit.firstSkippedMessage.c_str());
+	else if (commit.success)
 		obs_log(LOG_INFO, "pending restore applied successfully");
 	else if (commit.rolledBack)
 		obs_log(LOG_ERROR, "pending restore failed and was rolled back: %s", commit.errorMessage.c_str());
