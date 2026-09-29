@@ -6,7 +6,7 @@ Open it from **Tools → OBS Bakeup**.
 
 ## ✨ Features
 
-- 💾 **Create Backup** — pick a folder, and the plugin archives your OBS configuration into a single file, with a progress bar and remaining-time estimate.
+- 💾 **Create Backup** — pick a folder, and the plugin archives your whole OBS setup — settings **and installed plugins** — into a single file, with a progress bar and remaining-time estimate. The OBS version is part of the file name, e.g. `obs-backup_2026-09-29_1407_OBS-32.2.2.zip`.
 - 📂 **Restore from Backup** — pick a backup file, review what it contains (creation date, OBS version, source OS) and restore your full configuration from it.
 - 🔒 **Password protection** — optionally encrypt a backup (`.obsbak`, Argon2id + XChaCha20-Poly1305). Stream keys, tokens, file names and the manifest are unreadable without the password, and a strength hint helps you pick a good one. Plain `.zip` backups keep working as before.
   > ⚠️ There is no password recovery. If you forget the password, the backup cannot be restored.
@@ -20,12 +20,15 @@ Open it from **Tools → OBS Bakeup**.
 | --- | --- |
 | Global and user settings (`global.ini`, `user.ini`) | Logs |
 | Profiles and scene collections (`basic/`) | Crash reports |
-| Plugin configs (`plugin_config/`, including e.g. `obs-browser` logins) | Anything else OBS keeps internally (plugins, caches, temp files) |
+| Installed plugins (the `plugins/` folder) | Anything else OBS keeps internally (caches, temp files) |
+| Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins) | Plugins installed system-wide, outside your OBS user folder |
 | Themes | |
 
 Every archive carries a `manifest.json` (plugin, OBS and OS versions, creation time), which is used to validate a backup and to warn you, for example, when it was made on a different operating system.
 
-> 🔐 **Stream keys and account tokens are part of a backup.** Keep backup files somewhere safe, or protect them with a password.
+> 🎯 **Restoring is guaranteed only onto the same OBS version** the backup was made with — that is why the version is in the file name. Plugins are program code built for a specific OBS version and operating system, so restoring onto a different version or OS may leave some of them not working. It is your call which version to restore onto.
+
+> 🔐 **Stream keys and account tokens are part of a backup, and so is executable plugin code.** Keep backup files somewhere safe, protect them with a password, and only restore backups you trust.
 
 ## 🔄 How restoring works
 
@@ -35,6 +38,8 @@ OBS writes its own in-memory copy of your scene collections back to disk when it
 2. saves your current settings as a safety backup (the 5 most recent are kept in an `obs-backuper-safety` folder next to your OBS configuration);
 3. extracts the backup to a staging folder;
 4. offers to restart OBS, and applies the restore on the next launch, **before** OBS loads any scene collection.
+
+Plugins get extra care because OBS may already be running their code: a plugin file is never overwritten in place (it is left alone when identical, otherwise replaced by writing a new file and swapping it in), and this plugin's own files are never touched by a restore. Restored plugins start working after OBS restarts.
 
 You are told how the restore turned out once OBS is back up.
 
