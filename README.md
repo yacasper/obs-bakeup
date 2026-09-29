@@ -75,4 +75,6 @@ GPL-2.0-or-later — see [LICENSE](LICENSE). Required because the plugin links a
 
 The source code is free software: you may fork, modify and redistribute it under the terms of the GPL (see [NOTICE](NOTICE)). The GPL requires you to keep the copyright and license notices, mark your changes, and share the source of your version under the same license.
 
+OBS Bakeup is made by **Chill Pixel Bakery** — videos about streaming, gadgets and games on [YouTube](https://www.youtube.com/@ChillPixelBakery).
+
 Independently of the code license, the names **"OBS Bakeup"** and **"Chill Pixel Bakery"** and the "Made by Chill Pixel Bakery" credit identify the original project and its author. Please do not use these names for a modified or forked version in a way that suggests it is the original or endorsed by the author, and when you publish a fork, link back to the original project: <https://github.com/yacasper/obs-bakeup>.
