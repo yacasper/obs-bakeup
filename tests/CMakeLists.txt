@@ -44,6 +44,7 @@ add_executable(obs-backuper-core-tests
   test_WindowsLayout.cpp
   test_WindowsScenario.cpp
   test_MacScenario.cpp
+  test_ProjectLinks.cpp
 )
 
 target_link_libraries(obs-backuper-core-tests PRIVATE obs-backuper-core Catch2::Catch2WithMain)

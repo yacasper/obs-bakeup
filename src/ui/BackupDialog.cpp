@@ -12,6 +12,7 @@
 #include "../core/BackupManager.h"
 #include "../core/FileCollector.h"
 #include "../core/PathUtf8.h"
+#include "../core/ProjectLinks.h"
 #include "../core/RestoreFlow.h"
 #include "../core/RestoreManager.h"
 #include "../plugin-support.h"
@@ -32,6 +33,7 @@
 #include <QDialogButtonBox>
 #include <QEventLoop>
 #include <QFont>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLocale>
 #include <QFileDialog>
@@ -48,8 +50,6 @@
 
 namespace {
 
-constexpr const char *kAuthorName = "Chill Pixel Bakery";
-constexpr const char *kAuthorUrl = "https://www.youtube.com/@ChillPixelBakery";
 
 std::string CurrentSourceOs()
 {
@@ -244,18 +244,29 @@ BackupDialog::BackupDialog(QWidget *parent) : QDialog(parent)
 	// Credit link. The brand name and URL are not translatable UI text, so
 	// only the "Made by %1" wrapper lives in the locale files. Links are
 	// keyboard-focusable (Tab, Enter) for accessibility.
-	auto *madeBy = new QLabel(QString(obs_module_text("BackupDialog.MadeBy"))
-					   .arg(QString("<a href=\"%1\">%2</a>").arg(kAuthorUrl, kAuthorName)),
-				   this);
+	const QString madeByText =
+		QString(obs_module_text("BackupDialog.MadeBy"))
+			.arg(QString("<a href=\"%1\">%2</a>").arg(obs_backuper::kAuthorUrl, obs_backuper::kAuthorName));
+	const QString supportText = QString("\xF0\x9F\x92\x9C <a href=\"%1\">%2</a> \xF0\x9F\x92\x9C")
+					    .arg(obs_backuper::kSupportUrl, obs_module_text("BackupDialog.SupportProject"));
+	auto *madeBy = new QLabel(madeByText + "&nbsp;&nbsp;&middot;&nbsp;&nbsp;" + supportText, this);
 	madeBy->setTextFormat(Qt::RichText);
 	madeBy->setTextInteractionFlags(Qt::TextBrowserInteraction);
 	madeBy->setOpenExternalLinks(true);
 	madeBy->setAlignment(Qt::AlignCenter);
+	madeBy->setWordWrap(true);
 	layout->addWidget(madeBy);
 
+	// Bottom row: the plugin's version on the left, Close on the right.
+	auto *versionLabel = new QLabel(QString(obs_module_text("BackupDialog.Version")).arg(PLUGIN_VERSION), this);
+	versionLabel->setEnabled(false); // the dimmed look of secondary text
 	auto *buttons = new QDialogButtonBox(this);
 	auto *closeButton = buttons->addButton(obs_module_text("Common.Close"), QDialogButtonBox::RejectRole);
-	layout->addWidget(buttons);
+	auto *bottomRow = new QHBoxLayout();
+	bottomRow->addWidget(versionLabel, 0, Qt::AlignVCenter);
+	bottomRow->addStretch(1);
+	bottomRow->addWidget(buttons);
+	layout->addLayout(bottomRow);
 
 	connect(createBackupButton, &QPushButton::clicked, this, &BackupDialog::onCreateBackupClicked);
 	connect(restoreBackupButton, &QPushButton::clicked, this, &BackupDialog::onRestoreBackupClicked);

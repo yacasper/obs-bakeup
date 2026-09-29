@@ -131,4 +131,19 @@ std::optional<Version> FindNewerVersion(const std::string &jsonBody, const std::
 	return remote;
 }
 
+std::vector<std::string> LatestReleaseCurlArguments(const std::string &userAgent, int timeoutSeconds)
+{
+	return {"--silent",
+		"--show-error",
+		"--fail",
+		"--location",
+		"--max-time",
+		std::to_string(timeoutSeconds),
+		"--user-agent",
+		userAgent,
+		"--header",
+		"Accept: application/vnd.github+json",
+		kLatestReleaseApiUrl};
+}
+
 } // namespace obs_backuper

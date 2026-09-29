@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace obs_backuper {
 
@@ -18,6 +19,13 @@ namespace obs_backuper {
 // release, and the page the notice links to.
 inline constexpr const char *kLatestReleaseApiUrl = "https://api.github.com/repos/yacasper/obs-bakeup/releases/latest";
 inline constexpr const char *kReleasesPageUrl = "https://github.com/yacasper/obs-bakeup/releases/latest";
+
+// The arguments for the system's curl to fetch kLatestReleaseApiUrl. Used where
+// Qt cannot do HTTPS by itself: the OBS build for macOS ships no TLS backend for
+// Qt, so QNetworkAccessManager fails on every https:// address there. curl is
+// part of macOS and of current Windows. It fails (non-zero exit) on an HTTP
+// error status and gives up after `timeoutSeconds`.
+std::vector<std::string> LatestReleaseCurlArguments(const std::string &userAgent, int timeoutSeconds);
 
 struct Version {
 	int major = 0;
