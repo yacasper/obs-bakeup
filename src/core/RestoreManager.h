@@ -101,6 +101,12 @@ struct CommitOutcome {
 	// True if copying from stagingDir failed partway through and targetDir was
 	// automatically restored from safetyBackupPath.
 	bool rolledBack = false;
+
+	// How many plugin files the restore actually wrote (added or replaced;
+	// files that were already identical don't count). OBS builds its list of
+	// plugins before this plugin gets to apply a restore, so plugins restored
+	// here are only loaded on the launch after this one.
+	int pluginFilesChanged = 0;
 };
 
 // Everything CommitStagedRestore needs, persisted to disk by the UI layer

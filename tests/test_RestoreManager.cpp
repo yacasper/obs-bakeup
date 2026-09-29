@@ -745,3 +745,97 @@ TEST_CASE("Safety backups keep their sortable name and do not carry the OBS vers
 	CHECK(name.rfind("obs-backup_before-restore_", 0) == 0);
 	CHECK(name.find("OBS-") == std::string::npos);
 }
+
+TEST_CASE("CommitStagedRestore counts the plugin files it actually wrote", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	const auto targetDir = fixture.root / "obs-studio";
+
+	WriteFile(stagingDir / "plugins" / "new.plugin" / "lib", "NEW");
+	WriteFile(stagingDir / "plugins" / "changed.plugin" / "lib", "AFTER");
+	WriteFile(stagingDir / "plugins" / "same.plugin" / "lib", "SAME");
+	WriteFile(stagingDir / "plugins" / "obs-backuper.plugin" / "lib", "OWN-OLDER");
+	WriteFile(stagingDir / "global.ini", "size=1\n");
+	WriteFile(targetDir / "plugins" / "changed.plugin" / "lib", "BEFORE");
+	WriteFile(targetDir / "plugins" / "same.plugin" / "lib", "SAME");
+	WriteFile(targetDir / "plugins" / "obs-backuper.plugin" / "lib", "OWN-RUNNING");
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+
+	REQUIRE(commit.success);
+	// added + replaced only: not the identical one, not this plugin's own, not a setting.
+	CHECK(commit.pluginFilesChanged == 2);
+}
+
+TEST_CASE("A restore that touches no plugin files reports none", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto stagingDir = fixture.root / "staging";
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(stagingDir / "global.ini", "size=1\n");
+	WriteFile(stagingDir / "plugins" / "same.plugin" / "lib", "SAME");
+	WriteFile(targetDir / "plugins" / "same.plugin" / "lib", "SAME");
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
+
+	REQUIRE(commit.success);
+	CHECK(commit.pluginFilesChanged == 0);
+}
+
+#ifndef _WIN32
+TEST_CASE("A restored plugin keeps its execute permission", "[RestoreManager][plugins]")
+{
+	TempDirFixture fixture;
+	const auto exec = std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+			  std::filesystem::perms::others_exec;
+
+	// Source archive holds an executable plugin binary.
+	CollectionResult collected;
+	const auto binary = WriteFile(fixture.root / "src" / "plugins" / "p.plugin" / "Contents" / "MacOS" / "p", "BIN");
+	std::filesystem::permissions(binary, static_cast<std::filesystem::perms>(0755),
+				      std::filesystem::perm_options::replace);
+	collected.files = {{std::filesystem::path("plugins") / "p.plugin" / "Contents" / "MacOS" / "p", binary,
+			    std::filesystem::file_size(binary)}};
+	collected.totalSizeBytes = collected.files[0].sizeBytes;
+	BackupOptions backupOptions;
+	backupOptions.destinationDir = fixture.root / "backups";
+	backupOptions.pluginVersion = "1.0.0";
+	backupOptions.obsVersion = "32.2.2";
+	backupOptions.sourceOs = "macos";
+	const auto backup = BackupManager::CreateBackup(collected, backupOptions);
+	REQUIRE(backup.success);
+
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto restored = targetDir / "plugins" / "p.plugin" / "Contents" / "MacOS" / "p";
+
+	SECTION("a newly installed plugin")
+	{
+		auto options = MakeRestoreOptions(backup.archivePath, targetDir, fixture.root / "safety");
+		const auto staging = fixture.root / "staging";
+		const auto staged = RestoreManager::PerformStagedRestore(options, staging);
+		REQUIRE(staged.success);
+		REQUIRE(RestoreManager::CommitStagedRestore(staging, targetDir, staged.safetyBackupPath, 2, 1).success);
+
+		CHECK(ReadFile(restored) == "BIN");
+		CHECK((std::filesystem::status(restored).permissions() & exec) == exec);
+	}
+
+	SECTION("an identical file that lost its execute permission gets it back without being rewritten")
+	{
+		WriteFile(restored, "BIN");
+		std::filesystem::permissions(restored, static_cast<std::filesystem::perms>(0644),
+					      std::filesystem::perm_options::replace);
+
+		auto options = MakeRestoreOptions(backup.archivePath, targetDir, fixture.root / "safety");
+		const auto staging = fixture.root / "staging";
+		const auto staged = RestoreManager::PerformStagedRestore(options, staging);
+		REQUIRE(staged.success);
+		const auto commit = RestoreManager::CommitStagedRestore(staging, targetDir, staged.safetyBackupPath, 2, 1);
+		REQUIRE(commit.success);
+
+		CHECK((std::filesystem::status(restored).permissions() & exec) == exec);
+		CHECK(commit.pluginFilesChanged == 0);
+	}
+}
+#endif

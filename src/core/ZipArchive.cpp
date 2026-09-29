@@ -5,6 +5,8 @@
 #include "ZipArchive.h"
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace obs_backuper {
@@ -20,6 +22,44 @@ std::FILE *OpenNative(const std::filesystem::path &path, const wchar_t *wideMode
 	(void)wideMode;
 	return std::fopen(path.c_str(), narrowMode);
 #endif
+}
+
+constexpr const char *kModeCommentPrefix = "unix-mode=";
+
+#if !defined(_WIN32)
+// "unix-mode=0755" for a file with any execute bit set, empty for anything
+// else: only the executable bit is worth carrying (everything else gets the
+// default permissions of the machine restoring the backup).
+std::string ModeComment(const std::filesystem::path &sourcePath)
+{
+	std::error_code ec;
+	const auto permissions = std::filesystem::status(sourcePath, ec).permissions();
+	if (ec)
+		return {};
+
+	const auto execBits = std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+			      std::filesystem::perms::others_exec;
+	if ((permissions & execBits) == std::filesystem::perms::none)
+		return {};
+
+	const unsigned int mode = static_cast<unsigned int>(permissions) & 0777u;
+	char buffer[16];
+	std::snprintf(buffer, sizeof(buffer), "%s%04o", kModeCommentPrefix, mode);
+	return buffer;
+}
+#endif
+
+// Reads the mode back from an entry comment; 0 when absent or malformed.
+unsigned int ParseModeComment(const char *comment)
+{
+	if (!comment || std::strncmp(comment, kModeCommentPrefix, std::strlen(kModeCommentPrefix)) != 0)
+		return 0;
+
+	char *end = nullptr;
+	const unsigned long mode = std::strtoul(comment + std::strlen(kModeCommentPrefix), &end, 8);
+	if (end == comment + std::strlen(kModeCommentPrefix) || mode > 0777ul)
+		return 0;
+	return static_cast<unsigned int>(mode);
 }
 
 std::string LastMinizError(mz_zip_archive &archive)
@@ -99,8 +139,15 @@ bool ZipArchive::AddFile(const std::filesystem::path &absoluteSourcePath, const 
 	}
 
 	const std::string archiveName = archiveRelativePath.generic_u8string();
+#if defined(_WIN32)
+	const std::string modeComment;
+#else
+	const std::string modeComment = ModeComment(absoluteSourcePath);
+#endif
 	const mz_bool ok = mz_zip_writer_add_cfile(&archive_, archiveName.c_str(), source, static_cast<mz_uint64>(size),
-						    nullptr, nullptr, 0, MZ_DEFAULT_LEVEL, nullptr, 0, nullptr, 0);
+						    nullptr, modeComment.empty() ? nullptr : modeComment.c_str(),
+						    static_cast<mz_uint16>(modeComment.size()), MZ_DEFAULT_LEVEL, nullptr, 0,
+						    nullptr, 0);
 	std::fclose(source);
 
 	if (!ok) {
@@ -178,7 +225,8 @@ std::vector<ZipReader::Entry> ZipReader::ListEntries() const
 		// u8path() decodes it into a proper native path (e.g. UTF-16 on
 		// Windows) instead of going through the narrow "native" encoding,
 		// which would mangle non-ASCII names there.
-		entries.push_back({std::filesystem::u8path(stat.m_filename), static_cast<std::uintmax_t>(stat.m_uncomp_size)});
+		entries.push_back({std::filesystem::u8path(stat.m_filename), static_cast<std::uintmax_t>(stat.m_uncomp_size),
+				   ParseModeComment(stat.m_comment)});
 	}
 	return entries;
 }
@@ -227,6 +275,19 @@ bool ZipReader::ExtractEntryToFile(const std::string &archiveRelativePath, const
 		errorMessage = LastMinizError(archive_);
 		return false;
 	}
+
+#if !defined(_WIN32)
+	// Give an executable file its execute bits back.
+	const int index = mz_zip_reader_locate_file(&archive_, archiveRelativePath.c_str(), nullptr, 0);
+	mz_zip_archive_file_stat stat{};
+	if (index >= 0 && mz_zip_reader_file_stat(&archive_, static_cast<mz_uint>(index), &stat)) {
+		const unsigned int mode = ParseModeComment(stat.m_comment);
+		if (mode != 0) {
+			std::filesystem::permissions(destinationPath, static_cast<std::filesystem::perms>(mode),
+						     std::filesystem::perm_options::replace, ec);
+		}
+	}
+#endif
 	return true;
 }
 

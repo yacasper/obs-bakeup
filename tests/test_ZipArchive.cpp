@@ -214,3 +214,75 @@ TEST_CASE("ZipReader::Open fails for a file that does not exist", "[ZipReader]")
 	CHECK_FALSE(reader.Open(error));
 	CHECK_FALSE(error.empty());
 }
+
+#ifndef _WIN32
+TEST_CASE("An executable file keeps its execute permission through an archive", "[ZipArchive][permissions]")
+{
+	TempDirFixture fixture;
+	const auto script = WriteSourceFile(fixture.root / "src" / "run.sh", "#!/bin/sh\n");
+	const auto data = WriteSourceFile(fixture.root / "src" / "data.txt", "plain");
+	std::filesystem::permissions(script, static_cast<std::filesystem::perms>(0755),
+				      std::filesystem::perm_options::replace);
+	std::filesystem::permissions(data, static_cast<std::filesystem::perms>(0644),
+				      std::filesystem::perm_options::replace);
+
+	const auto zipPath = fixture.root / "out.zip";
+	{
+		ZipArchive archive(zipPath);
+		std::string error;
+		REQUIRE(archive.Open(error));
+		REQUIRE(archive.AddFile(script, "bin/run.sh", error));
+		REQUIRE(archive.AddFile(data, "data.txt", error));
+		REQUIRE(archive.Close(error));
+	}
+
+	ZipReader reader(zipPath);
+	std::string error;
+	REQUIRE(reader.Open(error));
+
+	unsigned int scriptMode = 0;
+	unsigned int dataMode = 99;
+	for (const auto &entry : reader.ListEntries()) {
+		if (entry.relativePath == std::filesystem::path("bin") / "run.sh")
+			scriptMode = entry.unixMode;
+		if (entry.relativePath == "data.txt")
+			dataMode = entry.unixMode;
+	}
+	CHECK(scriptMode == 0755);
+	CHECK(dataMode == 0); // only executables carry a mode
+
+	const auto outScript = fixture.root / "out" / "run.sh";
+	const auto outData = fixture.root / "out" / "data.txt";
+	REQUIRE(reader.ExtractEntryToFile("bin/run.sh", outScript, error));
+	REQUIRE(reader.ExtractEntryToFile("data.txt", outData, error));
+
+	const auto exec = std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+			  std::filesystem::perms::others_exec;
+	CHECK((std::filesystem::status(outScript).permissions() & exec) == exec);
+	CHECK((std::filesystem::status(outData).permissions() & exec) == std::filesystem::perms::none);
+}
+
+TEST_CASE("An archive without recorded modes extracts with default permissions", "[ZipArchive][permissions]")
+{
+	TempDirFixture fixture;
+	const auto zipPath = fixture.root / "legacy.zip";
+	{
+		// Written directly through miniz: what an older backup looks like.
+		mz_zip_archive archive{};
+		REQUIRE(mz_zip_writer_init_file(&archive, zipPath.string().c_str(), 0));
+		REQUIRE(mz_zip_writer_add_mem(&archive, "bin/tool", "binary", 6, MZ_DEFAULT_LEVEL));
+		REQUIRE(mz_zip_writer_finalize_archive(&archive));
+		REQUIRE(mz_zip_writer_end(&archive));
+	}
+
+	ZipReader reader(zipPath);
+	std::string error;
+	REQUIRE(reader.Open(error));
+	for (const auto &entry : reader.ListEntries())
+		CHECK(entry.unixMode == 0);
+
+	const auto out = fixture.root / "out" / "tool";
+	REQUIRE(reader.ExtractEntryToFile("bin/tool", out, error));
+	CHECK(std::filesystem::exists(out));
+}
+#endif

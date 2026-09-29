@@ -114,10 +114,27 @@ std::filesystem::path WithSuffix(const std::filesystem::path &path, const char *
 	return std::filesystem::path(path.string() + suffix);
 }
 
+// Gives `destination` the same permission bits as `source` (macOS/Linux; on
+// Windows there is nothing to copy). Best effort. Used so a restored plugin
+// keeps its execute bits, including when its content was already identical.
+void CopyPermissions(const std::filesystem::path &source, const std::filesystem::path &destination)
+{
+#if !defined(_WIN32)
+	std::error_code ec;
+	const auto permissions = std::filesystem::status(source, ec).permissions();
+	if (!ec)
+		std::filesystem::permissions(destination, permissions, std::filesystem::perm_options::replace, ec);
+#else
+	(void)source;
+	(void)destination;
+#endif
+}
+
 // Puts a copy of `source` at `destination` without ever modifying the
 // destination's existing file in place:
 //  - a destination with identical content is left alone (the usual case when
-//    restoring on the machine the backup came from, so nothing is written);
+//    restoring on the machine the backup came from, so nothing is written;
+//    only its permission bits are brought in line, which touches no content);
 //  - otherwise the new content is written next to it and renamed over it,
 //    which on macOS/Linux leaves anything that has the old file mapped
 //    untouched (it keeps the old inode);
@@ -126,11 +143,15 @@ std::filesystem::path WithSuffix(const std::filesystem::path &path, const char *
 //    new one takes its place. The "*.bakeup-old" file is removed on a later
 //    start (RemovePluginReplacementLeftovers).
 bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesystem::path &destination,
-		       std::string &errorMessage)
+		       std::string &errorMessage, bool &contentChanged)
 {
+	contentChanged = false;
+
 	std::error_code ec;
-	if (std::filesystem::exists(destination, ec) && FilesAreIdentical(source, destination))
+	if (std::filesystem::exists(destination, ec) && FilesAreIdentical(source, destination)) {
+		CopyPermissions(source, destination);
 		return true;
+	}
 
 	const auto fresh = WithSuffix(destination, kReplacementNewSuffix);
 	std::filesystem::copy_file(source, fresh, std::filesystem::copy_options::overwrite_existing, ec);
@@ -139,9 +160,13 @@ bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesyste
 		return false;
 	}
 
+	CopyPermissions(source, fresh);
+
 	std::filesystem::rename(fresh, destination, ec);
-	if (!ec)
+	if (!ec) {
+		contentChanged = true;
 		return true;
+	}
 
 	const auto old = WithSuffix(destination, kReplacementOldSuffix);
 	std::error_code asideEc;
@@ -161,6 +186,7 @@ bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesyste
 		std::filesystem::remove(fresh, asideEc);
 		return false;
 	}
+	contentChanged = true;
 	return true;
 }
 
@@ -170,8 +196,9 @@ bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesyste
 // plugin's own files are skipped.
 bool CopyWithRetries(const std::filesystem::path &sourceFile, const std::filesystem::path &destDir,
 		      const std::filesystem::path &relativePath, int maxAttempts, int retryDelayMs,
-		      std::string &errorMessage)
+		      std::string &errorMessage, bool &pluginFileChanged)
 {
+	pluginFileChanged = false;
 	if (IsOwnPluginPath(relativePath))
 		return true;
 
@@ -182,13 +209,15 @@ bool CopyWithRetries(const std::filesystem::path &sourceFile, const std::filesys
 	const bool isPlugin = IsPluginPath(relativePath);
 	for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
 		if (isPlugin) {
-			if (ReplaceFileSafely(sourceFile, destination, errorMessage))
+			if (ReplaceFileSafely(sourceFile, destination, errorMessage, pluginFileChanged))
 				return true;
 		} else {
 			std::error_code copyEc;
 			if (std::filesystem::copy_file(sourceFile, destination,
-							std::filesystem::copy_options::overwrite_existing, copyEc))
+							std::filesystem::copy_options::overwrite_existing, copyEc)) {
+				CopyPermissions(sourceFile, destination);
 				return true;
+			}
 			errorMessage = copyEc.message();
 		}
 
@@ -318,8 +347,9 @@ void RollbackFromSafetyBackup(const std::filesystem::path &safetyBackupPath, con
 		if (IsPluginPath(entry.relativePath)) {
 			// Never overwrite a possibly loaded plugin in place.
 			const auto temp = WithSuffix(destination, kRollbackTempSuffix);
+			bool changed = false;
 			if (reader.ExtractEntryToFile(entry.relativePath.generic_u8string(), temp, extractError))
-				ReplaceFileSafely(temp, destination, extractError);
+				ReplaceFileSafely(temp, destination, extractError, changed);
 			std::error_code removeEc;
 			std::filesystem::remove(temp, removeEc);
 			continue;
@@ -707,8 +737,12 @@ CommitOutcome RestoreManager::CommitStagedRestore(const std::filesystem::path &s
 			onProgress(i + 1, total, file.relativePath);
 
 		std::string copyError;
-		if (!CopyWithRetries(file.absolutePath, targetDir, file.relativePath, fileWriteMaxAttempts,
-				      fileWriteRetryDelayMs, copyError)) {
+		bool pluginFileChanged = false;
+		if (CopyWithRetries(file.absolutePath, targetDir, file.relativePath, fileWriteMaxAttempts,
+				     fileWriteRetryDelayMs, copyError, pluginFileChanged)) {
+			if (pluginFileChanged)
+				++outcome.pluginFilesChanged;
+		} else {
 			outcome.errorMessage = "failed to apply staged restore for \"" + file.relativePath.generic_string() +
 						"\": " + copyError;
 			outcome.errorKind = ErrorKind::RestoreApplyFailed;

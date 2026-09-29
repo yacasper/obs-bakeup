@@ -41,6 +41,9 @@ static QPointer<BackupDialog> backupDialog;
 static bool pendingRestoreHasResult = false;
 static bool pendingRestoreSuccess = false;
 static bool pendingRestoreRolledBack = false;
+// Plugin files the restore wrote. OBS has already listed the plugins to load
+// by the time this plugin applies a restore, so those load on the next launch.
+static bool pendingRestoreChangedPlugins = false;
 static std::string pendingRestoreErrorMessage;
 static obs_backuper::ErrorKind pendingRestoreErrorKind = obs_backuper::ErrorKind::None;
 
@@ -90,6 +93,7 @@ static void CommitPendingRestoreIfAny()
 	pendingRestoreHasResult = true;
 	pendingRestoreSuccess = commit.success;
 	pendingRestoreRolledBack = commit.rolledBack;
+	pendingRestoreChangedPlugins = commit.success && commit.pluginFilesChanged > 0;
 	pendingRestoreErrorMessage = commit.errorMessage;
 	pendingRestoreErrorKind = commit.errorKind;
 
@@ -111,8 +115,10 @@ static void onFrontendEvent(enum obs_frontend_event event, void *)
 
 	auto *mainWindow = static_cast<QWidget *>(obs_frontend_get_main_window());
 	if (pendingRestoreSuccess) {
-		QMessageBox::information(mainWindow, obs_module_text("BackupDialog.Title"),
-					  obs_module_text("RestoreDialog.PendingRestoreSuccess"));
+		QString text = obs_module_text("RestoreDialog.PendingRestoreSuccess");
+		if (pendingRestoreChangedPlugins)
+			text += "\n\n" + QString(obs_module_text("RestoreDialog.PendingRestorePlugins"));
+		QMessageBox::information(mainWindow, obs_module_text("BackupDialog.Title"), text);
 	} else if (pendingRestoreRolledBack) {
 		ShowErrorDialog(mainWindow, obs_module_text("RestoreDialog.PendingRestoreError"), pendingRestoreErrorKind,
 				QString::fromStdString(pendingRestoreErrorMessage),

@@ -35,7 +35,11 @@ public:
 	bool Open(std::string &errorMessage);
 
 	// Adds a file from disk to the archive under archiveRelativePath
-	// (separators are normalized to '/', the name is encoded as UTF-8).
+	// (separators are normalized to '/', the name is encoded as UTF-8). On
+	// macOS/Linux an executable file's permission bits are kept in the entry's
+	// comment ("unix-mode=0755") -- miniz has no API for real Unix attributes
+	// -- so an installed plugin's binaries stay executable after a restore.
+	// Readers that don't know the comment just ignore it.
 	bool AddFile(const std::filesystem::path &absoluteSourcePath, const std::filesystem::path &archiveRelativePath,
 		     std::string &errorMessage);
 
@@ -64,6 +68,11 @@ public:
 	struct Entry {
 		std::filesystem::path relativePath;
 		std::uintmax_t uncompressedSize = 0;
+
+		// Unix permission bits (e.g. 0755) recorded for an executable file when
+		// the backup was made; 0 when the archive holds none (older backups,
+		// backups made on Windows, ordinary non-executable files).
+		unsigned int unixMode = 0;
 	};
 
 	explicit ZipReader(std::filesystem::path zipPath);
