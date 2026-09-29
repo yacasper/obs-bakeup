@@ -1,0 +1,230 @@
+<!doctype html>
+<!--
+  OBS Bakeup card template, 1280x640 (the size GitHub asks for as a social preview).
+
+  One file, many cards: everything that changes is a query parameter, and every
+  parameter is optional.
+
+    card.html                                    the repository's social preview
+    card.html?title=Version%201.1&subtitle=...   another card in the same style
+
+  Parameters
+    tag        small pill above the title
+    icon       emoji before the title; empty hides it (default: the croissant)
+    title      the big line
+    subtitle   the sentence under it
+    chips      comma-separated list of small badges
+    footer     bottom-left line
+    credit     bottom-right line
+    image      picture on the right (path relative to this file); "none" hides it
+
+  Look: change only the variables in :root below. Export to PNG with export.sh.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>OBS Bakeup card</title>
+<style>
+  :root {
+    /* palette, taken from the plugin's dialog */
+    --bg-1: #12141a;
+    --bg-2: #1c1f2a;
+    --panel: #3a3d4a;
+    --text: #f5f6fa;
+    --muted: #a9adbd;
+    --accent: #a78bfa;        /* the purple of the hearts */
+    --accent-2: #f0abfc;
+    --link: #6d8cff;
+
+    /* geometry */
+    --width: 1280px;
+    --height: 640px;
+    --margin: 72px;           /* GitHub trims the edges, keep content inside */
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    width: var(--width);
+    height: var(--height);
+    overflow: hidden;
+    background: var(--bg-1);
+    color: var(--text);
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .card {
+    position: relative;
+    width: var(--width);
+    height: var(--height);
+    background:
+      radial-gradient(900px 520px at 88% 8%, rgba(167, 139, 250, 0.28), transparent 60%),
+      radial-gradient(700px 420px at 0% 100%, rgba(240, 171, 252, 0.14), transparent 60%),
+      linear-gradient(135deg, var(--bg-2), var(--bg-1));
+  }
+
+  /* fine dotted texture so the flat areas do not band */
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1.2px);
+    background-size: 22px 22px;
+    mask-image: linear-gradient(90deg, #000 30%, transparent 85%);
+  }
+
+  .text {
+    position: absolute;
+    left: var(--margin);
+    top: var(--margin);
+    bottom: var(--margin);
+    width: 660px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tag {
+    align-self: flex-start;
+    padding: 9px 20px;
+    border-radius: 999px;
+    border: 1px solid rgba(167, 139, 250, 0.55);
+    background: rgba(167, 139, 250, 0.14);
+    color: var(--accent-2);
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  h1 {
+    margin: 30px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 94px;
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+  }
+  /* the icon stays outside the gradient text: colour emoji lose their colour inside it */
+  h1 .icon { font-size: 84px; line-height: 1; letter-spacing: 0; }
+  h1 .icon:empty { display: none; }
+  h1 .title {
+    background: linear-gradient(100deg, #ffffff 30%, var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .subtitle {
+    margin: 26px 0 0;
+    font-size: 36px;
+    line-height: 1.28;
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 34px;
+  }
+
+  .chip {
+    padding: 8px 18px;
+    border-radius: 12px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 24px;
+    font-weight: 600;
+  }
+
+  .footer {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    font-size: 26px;
+    color: var(--muted);
+  }
+  .footer .credit { color: var(--text); font-weight: 600; }
+  .footer .dot { color: var(--accent); }
+
+  .shot {
+    position: absolute;
+    right: 70px;
+    top: 54px;
+    width: 440px;
+    transform: rotate(3.5deg);
+    transform-origin: 50% 0;
+    filter: drop-shadow(0 34px 44px rgba(0, 0, 0, 0.55));
+  }
+  /* the screenshot has square, dark corners: clip them to the window's own rounding */
+  .shot img { display: block; width: 100%; border-radius: 21px; }
+  .shot[hidden] { display: none; }
+
+  /* the picture runs off the bottom edge on purpose */
+  .card { overflow: hidden; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="text">
+      <div class="tag" id="tag"></div>
+      <h1><span class="icon" id="icon"></span><span class="title" id="title"></span></h1>
+      <p class="subtitle" id="subtitle"></p>
+      <div class="chips" id="chips"></div>
+      <div class="footer">
+        <span id="footer"></span>
+        <span class="dot">&bull;</span>
+        <span class="credit" id="credit"></span>
+      </div>
+    </div>
+    <div class="shot" id="shot"><img id="image" alt=""></div>
+  </div>
+
+<script>
+  // Defaults are the repository's social preview.
+  const defaults = {
+    tag: "FREE OBS PLUGIN",
+    icon: "\u{1F950}",
+    title: "OBS Bakeup",
+    subtitle: "Back up and restore your whole OBS setup with two buttons",
+    chips: "Profiles,Scenes,Hotkeys,Docks,Plugins",
+    footer: "Windows · macOS",
+    credit: "Chill Pixel Bakery",
+    image: "../dialog.png",
+  };
+
+  const query = new URLSearchParams(location.search);
+  const value = (name) => (query.has(name) ? query.get(name) : defaults[name]);
+
+  // textContent only: a parameter can never inject markup.
+  document.getElementById("tag").textContent = value("tag");
+  document.getElementById("icon").textContent = value("icon");
+  document.getElementById("title").textContent = value("title");
+  document.getElementById("subtitle").textContent = value("subtitle");
+  document.getElementById("footer").textContent = value("footer");
+  document.getElementById("credit").textContent = value("credit");
+
+  const chips = document.getElementById("chips");
+  for (const text of value("chips").split(",").map((s) => s.trim()).filter(Boolean)) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = text;
+    chips.appendChild(chip);
+  }
+
+  const image = value("image");
+  if (image === "none" || image === "") {
+    document.getElementById("shot").hidden = true;
+  } else {
+    document.getElementById("image").src = image;
+  }
+</script>
+</body>
+</html>
