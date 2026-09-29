@@ -7,6 +7,7 @@
 #include <obs-module.h>
 
 #include "../core/Crypto.h"
+#include "../core/GuardedCall.h"
 #include "../core/PathUtf8.h"
 #include "../plugin-support.h"
 
@@ -27,12 +28,15 @@ void BackupWorker::run()
 		emit encryptionProgressChanged(static_cast<qint64>(done), static_cast<qint64>(total));
 	};
 
-	const auto outcome = obs_backuper::BackupManager::CreateBackup(
-		collected_, options_,
-		[this](std::size_t current, std::size_t total, const std::filesystem::path &currentFile) {
-			emit progressChanged(static_cast<qint64>(current), static_cast<qint64>(total),
-					      QString::fromStdString(obs_backuper::GenericPathToUtf8(currentFile)));
-		});
+	const auto create = [this] {
+		return obs_backuper::BackupManager::CreateBackup(
+			collected_, options_,
+			[this](std::size_t current, std::size_t total, const std::filesystem::path &currentFile) {
+				emit progressChanged(static_cast<qint64>(current), static_cast<qint64>(total),
+						      QString::fromStdString(obs_backuper::GenericPathToUtf8(currentFile)));
+			});
+	};
+	const auto outcome = obs_backuper::RunGuarded<decltype(create())>(create);
 
 	// The password is not needed past this point.
 	obs_backuper::crypto::SecureWipe(options_.password);
