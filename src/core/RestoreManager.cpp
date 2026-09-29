@@ -10,6 +10,7 @@
 #include "ZipArchive.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -62,7 +63,18 @@ std::string AsciiFold(std::string value);
 // never overwritten in place: overwriting a loaded library corrupts the
 // running process on macOS and is refused by the OS on Windows.
 constexpr const char *kPluginsDirName = "plugins";
-constexpr const char *kOwnPluginPrefix = "obs-backuper"; // this plugin's own folder/bundle
+// This plugin's own folder/bundle: the current name and the one it had before
+// it was renamed, so builds of either name stay protected.
+constexpr std::array<const char *, 2> kOwnPluginPrefixes = {"obs-bakeup", "obs-backuper"};
+
+bool IsOwnPluginName(const std::string &name)
+{
+	for (const char *prefix : kOwnPluginPrefixes) {
+		if (name.rfind(prefix, 0) == 0)
+			return true;
+	}
+	return false;
+}
 constexpr const char *kReplacementNewSuffix = ".bakeup-new";
 constexpr const char *kReplacementOldSuffix = ".bakeup-old";
 constexpr const char *kRollbackTempSuffix = ".bakeup-rollback";
@@ -84,13 +96,13 @@ bool IsPluginPath(const std::filesystem::path &relativePath)
 // never touched: replacing them could crash the very code doing the restore.
 bool IsOwnPluginPath(const std::filesystem::path &relativePath)
 {
-	return IsPluginPath(relativePath) && NthComponent(relativePath, 1).rfind(kOwnPluginPrefix, 0) == 0;
+	return IsPluginPath(relativePath) && IsOwnPluginName(NthComponent(relativePath, 1));
 }
 
 // The same rule for a path inside a PluginRoot folder ("<plugin>/...").
 bool IsOwnPluginInRoot(const std::filesystem::path &pathInsideRoot)
 {
-	return NthComponent(pathInsideRoot, 0).rfind(kOwnPluginPrefix, 0) == 0;
+	return IsOwnPluginName(NthComponent(pathInsideRoot, 0));
 }
 
 // The PluginRoot an archive path belongs to (by prefix), or null if this

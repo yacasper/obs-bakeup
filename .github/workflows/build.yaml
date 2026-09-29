@@ -55,8 +55,8 @@ jobs:
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4
         with:
-          name: obs-backuper-macos-universal-${{ github.sha }}
-          path: ${{ github.workspace }}/release/obs-backuper-*-macos-universal.*
+          name: obs-bakeup-macos-universal-${{ github.sha }}
+          path: ${{ github.workspace }}/release/obs-bakeup-*-macos-universal.*
 
       - uses: actions/cache/save@v4
         if: github.event_name != 'pull_request' && steps.ccache-cache.outputs.cache-hit != 'true'
@@ -95,5 +95,5 @@ jobs:
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4
         with:
-          name: obs-backuper-windows-x64-${{ github.sha }}
-          path: ${{ github.workspace }}/release/obs-backuper-*-windows-x64*.*
+          name: obs-bakeup-windows-x64-${{ github.sha }}
+          path: ${{ github.workspace }}/release/obs-bakeup-*-windows-x64*.*

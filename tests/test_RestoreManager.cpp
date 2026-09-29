@@ -614,11 +614,21 @@ TEST_CASE("CommitStagedRestore never touches this plugin's own files", "[Restore
 	const auto ownWin =
 		WriteFile(targetDir / "plugins" / "obs-backuper" / "bin" / "64bit" / "obs-backuper.dll", "RUNNING-BUILD");
 
+	// The current name, on both platforms.
+	WriteFile(stagingDir / "plugins" / "obs-bakeup.plugin" / "Contents" / "MacOS" / "obs-bakeup", "OLDER-BUILD");
+	WriteFile(stagingDir / "plugins" / "obs-bakeup" / "bin" / "64bit" / "obs-bakeup.dll", "OLDER-BUILD");
+	const auto bakeupMac = WriteFile(targetDir / "plugins" / "obs-bakeup.plugin" / "Contents" / "MacOS" / "obs-bakeup",
+					 "RUNNING-BUILD");
+	const auto bakeupWin =
+		WriteFile(targetDir / "plugins" / "obs-bakeup" / "bin" / "64bit" / "obs-bakeup.dll", "RUNNING-BUILD");
+
 	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
 
 	REQUIRE(commit.success);
 	CHECK(ReadFile(ownMac) == "RUNNING-BUILD");
 	CHECK(ReadFile(ownWin) == "RUNNING-BUILD");
+	CHECK(ReadFile(bakeupMac) == "RUNNING-BUILD");
+	CHECK(ReadFile(bakeupWin) == "RUNNING-BUILD");
 	CHECK(ReadFile(targetDir / "plugins" / "other.plugin" / "lib") == "OTHER-NEW");
 }
 
@@ -874,17 +884,20 @@ TEST_CASE("PerformStagedRestore puts plugins in place right away but leaves sett
 TEST_CASE("PerformStagedRestore never replaces this plugin's own files", "[RestoreManager][plugins][staged]")
 {
 	TempDirFixture fixture;
-	const auto archive = BuildArchiveWithPlugins(
-		fixture, {{"obs-backuper.plugin/lib", "OLDER-BUILD"}, {"other.plugin/lib", "OTHER"}});
+	const auto archive = BuildArchiveWithPlugins(fixture, {{"obs-backuper.plugin/lib", "OLDER-BUILD"},
+								{"obs-bakeup.plugin/lib", "OLDER-BUILD"},
+								{"other.plugin/lib", "OTHER"}});
 
 	const auto targetDir = fixture.root / "obs-studio";
 	const auto own = WriteFile(targetDir / "plugins" / "obs-backuper.plugin" / "lib", "RUNNING-BUILD");
+	const auto ownBakeup = WriteFile(targetDir / "plugins" / "obs-bakeup.plugin" / "lib", "RUNNING-BUILD");
 
 	const auto staged = RestoreManager::PerformStagedRestore(
 		MakeRestoreOptions(archive, targetDir, fixture.root / "safety"), fixture.root / "staging");
 
 	REQUIRE(staged.success);
 	CHECK(ReadFile(own) == "RUNNING-BUILD");
+	CHECK(ReadFile(ownBakeup) == "RUNNING-BUILD");
 	CHECK(ReadFile(targetDir / "plugins" / "other.plugin" / "lib") == "OTHER");
 	CHECK_FALSE(std::filesystem::exists(fixture.root / "staging" / "plugins" / "obs-backuper.plugin"));
 }

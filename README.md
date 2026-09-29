@@ -49,7 +49,10 @@ You are told how the restore turned out once OBS is back up.
 
 ## 📦 Installation
 
-Download the package for your operating system from the [Releases](https://github.com/yacasper/obs-bakeup/releases) page and install it the way you would any OBS plugin, then restart OBS. Requires **OBS Studio 31 or newer**: the plugin is built against OBS Studio 31 and tested with 32.2. Older versions are not supported.
+Download the package for your operating system from the [Releases](https://github.com/yacasper/obs-bakeup/releases) page, then restart OBS. Requires **OBS Studio 31 or newer**: the plugin is built against OBS Studio 31 and tested with 32.2. Older versions are not supported.
+
+- **macOS** — open the installer package and follow the steps.
+- **Windows** — there is no installer. Close OBS, then extract the whole contents of the `.zip` into your OBS folder (usually `C:\Program Files\obs-studio`), merging it with the existing `obs-plugins` and `data` folders. Windows asks for administrator rights to write there. The archive is laid out like the OBS folder itself, so nothing needs to be moved around afterwards.
 
 ## 🛠️ Building from source
 

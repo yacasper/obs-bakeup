@@ -33,10 +33,10 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.chillcody9.obs-backuper"
+            "bundleId": "com.chillcody9.obs-bakeup"
         }
     },
-    "name": "obs-backuper",
+    "name": "obs-bakeup",
     "displayName": "OBS Bakeup",
     "version": "0.1.0",
     "author": "Acid Crusher",
