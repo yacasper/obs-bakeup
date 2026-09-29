@@ -4,6 +4,10 @@ A plugin for [OBS Studio](https://obsproject.com/) (Windows and macOS) that lets
 
 Open it from **Tools → OBS Bakeup**.
 
+<p align="center">
+  <img src="assets/dialog.png" alt="The OBS Bakeup dialog: Create Backup, Protect with a password, Restore from Backup, the last backup date and the plugin version" width="420">
+</p>
+
 ## ✨ Features
 
 - 💾 **Create Backup** — pick a folder, and the plugin archives your whole OBS setup — settings **and installed plugins** — into a single file, with a progress bar and remaining-time estimate. The OBS version is part of the file name, e.g. `obs-backup_2026-09-29_1407_OBS-32.2.2.zip`.
