@@ -66,7 +66,7 @@ Version 0.1.1. Backup and restore are checked end to end on **Windows** (normal 
 
 ## 💜 Support the project
 
-OBS Bakeup is free and open source. If it saved you a stream setup and you would like to say thanks, you can support the project here: <https://destream.net/live/Chillcody>
+OBS Bakeup is free and open source. If it saved you a stream setup and you would like to say thanks, you can [**support the project**](https://destream.net/live/Chillcody).
 
 ## 📜 License
 
