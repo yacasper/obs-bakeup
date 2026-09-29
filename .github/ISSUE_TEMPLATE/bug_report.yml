@@ -1,0 +1,94 @@
+name: Bug report
+description: Something did not work when backing up, restoring or updating
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The more of the fields below you fill in, the faster it can be fixed.
+
+        **Before you post anything, remove stream keys, tokens and passwords.** Log files can contain paths with your user name; look them over first.
+  - type: input
+    id: plugin_version
+    attributes:
+      label: OBS Bakeup version
+      description: Shown at the bottom left of the plugin's dialog (Tools → OBS Bakeup).
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: obs_version
+    attributes:
+      label: OBS Studio version
+      description: Help → About in OBS.
+      placeholder: "32.2.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: install_kind
+    attributes:
+      label: How OBS is installed
+      options:
+        - Normal install
+        - Portable mode (Windows)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: action
+    attributes:
+      label: What were you doing?
+      options:
+        - Creating a backup
+        - Creating a password-protected backup
+        - Restoring a backup
+        - Restoring a password-protected backup
+        - Installing the plugin
+        - The update notice
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead. A screenshot of any message helps; "Show details" in the error window has the technical text.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines
+      description: |
+        Lines containing `obs-bakeup` from the newest OBS log (Help → Log Files → Show Log Files).
+        Windows: `%APPDATA%\obs-studio\logs` (portable: `config\obs-studio\logs`). macOS: `~/Library/Application Support/obs-studio/logs`.
+        If OBS crashed, the crash report is in the `crashes` folder next to `logs` (macOS: `~/Library/Logs/DiagnosticReports`).
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed stream keys, tokens and passwords from everything I posted here
+          required: true
+        - label: I use the latest release of OBS Bakeup

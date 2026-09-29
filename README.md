@@ -64,6 +64,10 @@ Download the package for your operating system from the [Releases](https://githu
 
 When you first open the plugin's dialog in an OBS session, it makes **one** anonymous request to the GitHub Releases API (`api.github.com`) to find the latest release. Nothing about you or your setup is sent, and if the request fails (offline, rate limit) the plugin simply carries on without a notice. The plugin never downloads or installs anything by itself — the notice only links to the release page.
 
+## 🐞 Report a problem
+
+Found a bug or have an idea? [Open an issue](https://github.com/yacasper/obs-bakeup/issues/new/choose) — the form asks for the plugin and OBS versions, your system and the relevant log lines, and says where to find them. Please remove stream keys, tokens and passwords from anything you post.
+
 ## 🚧 Status
 
 Version 1.0.0. Backup and restore are checked end to end on **Windows** (normal and portable OBS 32.2, repeated restores included) and on **macOS** (OBS 32.2, password-protected backup restored twice). macOS packages are not signed yet, so macOS may ask you to right-click the installer and choose **Open**.
