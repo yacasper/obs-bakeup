@@ -40,7 +40,7 @@ You are told how the restore turned out once OBS is back up.
 
 ## 📦 Installation
 
-Download the package for your operating system from the [Releases](https://github.com/yacasper/obs-bakeup/releases) page and install it the way you would any OBS plugin, then restart OBS. The plugin is built against OBS Studio 31 and tested with 32.2. It only uses long-standing OBS APIs and Qt 6, so OBS Studio 28 or newer (the first Qt 6 release) should work, but older versions are untested.
+Download the package for your operating system from the [Releases](https://github.com/yacasper/obs-bakeup/releases) page and install it the way you would any OBS plugin, then restart OBS. Requires **OBS Studio 31 or newer**: the plugin is built against OBS Studio 31 and tested with 32.2. Older versions are not supported.
 
 ## 🛠️ Building from source
 
