@@ -22,6 +22,29 @@ struct CollectionResult {
 	std::uintmax_t totalSizeBytes = 0;
 };
 
+// A folder OUTSIDE the obs-studio directory that holds installed plugins:
+// on Windows OBS looks for third-party plugins in %ProgramData%\obs-studio\
+// plugins (or <OBS folder>\plugins in portable mode), not next to its
+// settings. Its files go into an archive under "<archivePrefix>/..." and are
+// put back into `dir` on restore. (macOS keeps plugins inside the obs-studio
+// directory, so it needs none.)
+struct PluginRoot {
+	std::string archivePrefix; // first path component inside the archive
+	std::filesystem::path dir; // where the folder is on this machine
+};
+
+// Archive prefixes for those folders. They are fixed strings because backups
+// are restored later, possibly elsewhere, and must be recognised by name.
+inline constexpr const char *kSystemPluginsPrefix = "system-plugins";
+inline constexpr const char *kPortablePluginsPrefix = "portable-plugins";
+
+// True if an archive path lies under one of the plugin-root prefixes above.
+bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath);
+
+// Appends every file under root.dir to `result`, named "<prefix>/<path inside
+// dir>". A missing or unreadable folder adds nothing.
+void CollectPluginRoot(const PluginRoot &root, CollectionResult &result);
+
 // Sections of the obs-studio directory included in the backup by default.
 //
 // This is an allow-list, not a deny-list: any internal OBS directories/files

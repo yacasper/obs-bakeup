@@ -40,6 +40,10 @@ void RestoreWorker::run()
 	// The password is not needed past this point.
 	obs_backuper::crypto::SecureWipe(options_.password);
 
+	if (outcome.pluginFilesFailed > 0)
+		obs_log(LOG_WARNING, "%d plugin file(s) could not be restored, first: %s", outcome.pluginFilesFailed,
+			outcome.pluginFailureMessage.c_str());
+
 	if (outcome.success) {
 		obs_log(LOG_INFO, "restore staged successfully (safety backup: \"%s\"); will be applied on next OBS launch",
 			outcome.safetyBackupPath.string().c_str());
@@ -50,5 +54,6 @@ void RestoreWorker::run()
 	emit stagingFinished(outcome.success, QString::fromStdString(outcome.errorMessage),
 			      static_cast<int>(outcome.errorKind),
 			      QString::fromStdString(outcome.stagingDir.string()),
-			      QString::fromStdString(outcome.safetyBackupPath.string()));
+			      QString::fromStdString(outcome.safetyBackupPath.string()), outcome.pluginFilesFailed,
+			      QString::fromStdString(outcome.pluginFailureMessage));
 }

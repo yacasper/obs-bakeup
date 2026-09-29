@@ -23,29 +23,61 @@ constexpr Platform kCurrentPlatform =
 
 } // namespace
 
-std::filesystem::path GetObsDataDir()
+namespace {
+
+std::filesystem::path ExecutableDir()
 {
-	char buffer[4096] = {};
-	std::optional<std::filesystem::path> obsConfigPath;
+	return std::filesystem::path(QCoreApplication::applicationDirPath().toStdString());
+}
 
-	if (os_get_config_path(buffer, sizeof(buffer), "obs-studio") == 0 && buffer[0] != '\0')
-		obsConfigPath = std::filesystem::path(buffer);
+// Portable mode exists on Windows only (official macOS builds don't enable
+// it), and os_get_config_path() knows nothing about it, so replicate OBS's
+// own check.
+bool RunningPortable()
+{
+	if (kCurrentPlatform != Platform::Windows)
+		return false;
 
-	const auto executableDir =
-		std::filesystem::path(QCoreApplication::applicationDirPath().toStdString());
-
-	// Portable mode exists on Windows only (official macOS builds don't enable
-	// it), and os_get_config_path() knows nothing about it, so replicate OBS's
-	// own check.
 	bool portableFlagGiven = false;
 	for (const QString &argument : QCoreApplication::arguments()) {
 		if (argument == "--portable" || argument == "-p")
 			portableFlagGiven = true;
 	}
-	const bool portableMode =
-		kCurrentPlatform == Platform::Windows && IsPortableMode(kCurrentPlatform, executableDir, portableFlagGiven);
+	return IsPortableMode(kCurrentPlatform, ExecutableDir(), portableFlagGiven);
+}
 
-	return ResolveObsDataDir(kCurrentPlatform, obsConfigPath, executableDir, portableMode);
+} // namespace
+
+std::filesystem::path GetObsDataDir()
+{
+	char buffer[4096] = {};
+	std::optional<std::filesystem::path> obsConfigPath;
+
+	// os_get_config_path() returns the length of the path (or -1 on failure),
+	// not zero on success.
+	if (os_get_config_path(buffer, sizeof(buffer), "obs-studio") > 0 && buffer[0] != '\0')
+		obsConfigPath = std::filesystem::path(buffer);
+
+	return ResolveObsDataDir(kCurrentPlatform, obsConfigPath, ExecutableDir(), RunningPortable());
+}
+
+std::vector<PluginRoot> GetExtraPluginRoots()
+{
+	std::vector<PluginRoot> roots;
+
+#if defined(_WIN32)
+	if (RunningPortable()) {
+		const auto base = ObsBasePathFromExecutableDir(kCurrentPlatform, ExecutableDir());
+		if (!base.empty())
+			roots.push_back({kPortablePluginsPrefix, base / "plugins"});
+	} else {
+		char buffer[4096] = {};
+		if (os_get_program_data_path(buffer, sizeof(buffer), "obs-studio/plugins") > 0 && buffer[0] != '\0')
+			roots.push_back({kSystemPluginsPrefix, std::filesystem::path(buffer)});
+	}
+#endif
+
+	return roots;
 }
 
 std::filesystem::path GetSafetyBackupDir()

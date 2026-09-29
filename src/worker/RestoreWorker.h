@@ -39,7 +39,7 @@ signals:
 	// success/errorMessage/errorKind/stagingDir/safetyBackupPath — see
 	// obs_backuper::StagedRestoreOutcome.
 	void stagingFinished(bool success, const QString &errorMessage, int errorKind, const QString &stagingDir,
-			      const QString &safetyBackupPath);
+			      const QString &safetyBackupPath, int pluginFilesFailed, const QString &pluginFailureMessage);
 
 protected:
 	void run() override;

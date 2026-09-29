@@ -151,3 +151,100 @@ TEST_CASE("CollectFiles returns an empty result for a non-existent directory", "
 	REQUIRE(result.files.empty());
 	REQUIRE(result.totalSizeBytes == 0);
 }
+
+// ---------------------------------------------------------------------------
+// Plugin folders outside the obs-studio directory (Windows: %ProgramData%).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void WritePluginFile(const std::filesystem::path &path, const std::string &content)
+{
+	std::filesystem::create_directories(path.parent_path());
+	std::ofstream(path, std::ios::binary) << content;
+}
+
+class PluginRootFixture {
+public:
+	PluginRootFixture() : root(std::filesystem::temp_directory_path() / "obs-backuper-pluginroot-tests" / UniqueName())
+	{
+		std::filesystem::create_directories(root);
+		WritePluginFile(root / "foo" / "foo.dll", "dll");
+		WritePluginFile(root / "foo" / "data" / "locale" / "en-US.ini", "x=1");
+		WritePluginFile(root / "bar" / "bin" / "64bit" / "bar.dll", "bar-dll");
+		WritePluginFile(root / ".DS_Store", "junk");
+	}
+	~PluginRootFixture() { std::filesystem::remove_all(root.parent_path()); }
+
+	const std::filesystem::path root;
+
+private:
+	static std::string UniqueName()
+	{
+		static int counter = 0;
+		return "fixture-" + std::to_string(++counter);
+	}
+};
+
+} // namespace
+
+TEST_CASE("CollectPluginRoot names files under the archive prefix", "[FileCollector][pluginroot]")
+{
+	PluginRootFixture fixture;
+	CollectionResult result;
+
+	CollectPluginRoot({kSystemPluginsPrefix, fixture.root}, result);
+
+	CHECK(result.files.size() == 3);
+	CHECK(ContainsRelativePath(result, std::filesystem::path("system-plugins") / "foo" / "foo.dll"));
+	CHECK(ContainsRelativePath(result, std::filesystem::path("system-plugins") / "foo" / "data" / "locale" / "en-US.ini"));
+	CHECK(ContainsRelativePath(result, std::filesystem::path("system-plugins") / "bar" / "bin" / "64bit" / "bar.dll"));
+	CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("system-plugins") / ".DS_Store"));
+
+	// Absolute paths still point at the real files, and the total adds up.
+	std::uintmax_t expected = 0;
+	for (const auto &file : result.files) {
+		CHECK(std::filesystem::exists(file.absolutePath));
+		expected += std::filesystem::file_size(file.absolutePath);
+	}
+	CHECK(result.totalSizeBytes == expected);
+}
+
+TEST_CASE("CollectPluginRoot adds to what is already collected", "[FileCollector][pluginroot]")
+{
+	ObsDirFixture obs;
+	PluginRootFixture fixture;
+
+	auto result = CollectFiles(obs.root);
+	const auto filesBefore = result.files.size();
+	const auto sizeBefore = result.totalSizeBytes;
+
+	CollectPluginRoot({kPortablePluginsPrefix, fixture.root}, result);
+
+	CHECK(result.files.size() == filesBefore + 3);
+	CHECK(result.totalSizeBytes > sizeBefore);
+	CHECK(ContainsRelativePath(result, "global.ini")); // the settings are still there
+}
+
+TEST_CASE("CollectPluginRoot ignores a missing folder or an empty prefix", "[FileCollector][pluginroot]")
+{
+	PluginRootFixture fixture;
+	CollectionResult result;
+
+	CollectPluginRoot({kSystemPluginsPrefix, fixture.root / "does-not-exist"}, result);
+	CollectPluginRoot({"", fixture.root}, result);
+	CollectPluginRoot({kSystemPluginsPrefix, fixture.root / "foo" / "foo.dll"}, result); // a file, not a folder
+
+	CHECK(result.files.empty());
+	CHECK(result.totalSizeBytes == 0);
+}
+
+TEST_CASE("IsPluginRootEntry recognises only the plugin-folder prefixes", "[FileCollector][pluginroot]")
+{
+	CHECK(IsPluginRootEntry(std::filesystem::path("system-plugins") / "foo" / "foo.dll"));
+	CHECK(IsPluginRootEntry(std::filesystem::path("portable-plugins") / "foo" / "foo.dll"));
+	CHECK_FALSE(IsPluginRootEntry(std::filesystem::path("plugins") / "foo.plugin" / "lib"));
+	CHECK_FALSE(IsPluginRootEntry(std::filesystem::path("system-plugins-old") / "x"));
+	CHECK_FALSE(IsPluginRootEntry("global.ini"));
+	CHECK_FALSE(IsPluginRootEntry(""));
+}

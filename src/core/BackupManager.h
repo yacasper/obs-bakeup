@@ -34,6 +34,11 @@ struct BackupOptions {
 	// "obs-backup_before-restore" for its automatic safety backups.
 	std::string archiveBaseNamePrefix = "obs-backup";
 
+	// Extra section names recorded in the manifest next to the standard ones
+	// (e.g. the archive prefix of each plugin folder outside the obs-studio
+	// directory that the caller added to the collection).
+	std::vector<std::string> extraIncludedSections;
+
 	// Put obsVersion into the archive file name. RestoreManager turns this off
 	// for its safety backups, whose names are sorted to rotate the oldest ones.
 	bool appendObsVersionToFileName = true;

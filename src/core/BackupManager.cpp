@@ -194,6 +194,8 @@ BackupOutcome BackupManager::CreateBackup(const CollectionResult &collected, con
 	manifestInfo.sourceOsVersion = options.sourceOsVersion;
 	manifestInfo.obsVersion = options.obsVersion;
 	manifestInfo.includedSections = kDefaultIncludedTopLevelEntries;
+	manifestInfo.includedSections.insert(manifestInfo.includedSections.end(), options.extraIncludedSections.begin(),
+					     options.extraIncludedSections.end());
 	manifestInfo.excludedSections = kDefaultExcludedTopLevelSections;
 
 	{

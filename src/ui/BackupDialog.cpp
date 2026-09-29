@@ -339,7 +339,11 @@ void BackupDialog::onCreateBackupClicked()
 	if (activeBackupWorker || activeRestoreWorker)
 		return;
 
-	const auto collected = obs_backuper::CollectFiles(obs_backuper::GetObsDataDir());
+	auto collected = obs_backuper::CollectFiles(obs_backuper::GetObsDataDir());
+	// Plugins that live outside the OBS data dir (Windows) go into the backup too.
+	const auto pluginRoots = obs_backuper::GetExtraPluginRoots();
+	for (const auto &root : pluginRoots)
+		obs_backuper::CollectPluginRoot(root, collected);
 	const double totalMegabytes = static_cast<double>(collected.totalSizeBytes) / (1024.0 * 1024.0);
 
 	obs_log(LOG_INFO, "collected %zu files (%.2f MB) for backup", collected.files.size(), totalMegabytes);
@@ -378,6 +382,8 @@ void BackupDialog::onCreateBackupClicked()
 	options.sourceOs = CurrentSourceOs();
 	options.sourceOsVersion = QSysInfo::productVersion().toStdString();
 	options.obsVersion = obs_get_version_string();
+	for (const auto &root : pluginRoots)
+		options.extraIncludedSections.push_back(root.archivePrefix);
 
 	auto *worker = new BackupWorker(collected, options, this);
 	auto *progress = new ProgressDialog(this);
@@ -503,6 +509,7 @@ void BackupDialog::onRestoreBackupClicked()
 	obs_backuper::RestoreOptions options;
 	options.archivePath = archivePath;
 	options.targetDir = targetDir;
+	options.pluginRoots = obs_backuper::GetExtraPluginRoots();
 	options.safetyBackupDir = safetyBackupDir;
 	options.pluginVersion = PLUGIN_VERSION;
 	options.sourceOs = currentOs;
@@ -541,7 +548,8 @@ void BackupDialog::onRestoreBackupClicked()
 	connect(worker, &RestoreWorker::stagingFinished, this,
 		[this, progress, safetyBackupDir, options](bool success, const QString &errorMessage,
 								    int errorKind, const QString &stagingDirStr,
-								    const QString &safetyBackupPath) mutable {
+								    const QString &safetyBackupPath, int pluginFilesFailed,
+								    const QString &pluginFailureMessage) mutable {
 			// The worker has its own copy; don't keep another one alive here.
 			obs_backuper::crypto::SecureWipe(options.password);
 			progress->close();
@@ -575,7 +583,12 @@ void BackupDialog::onRestoreBackupClicked()
 			QMessageBox successBox(this);
 			successBox.setWindowTitle(obs_module_text("BackupDialog.Title"));
 			successBox.setIcon(QMessageBox::Information);
-			successBox.setText(QString(obs_module_text("RestoreDialog.RestoreStaged")).arg(safetyBackupPath));
+			QString successText = QString(obs_module_text("RestoreDialog.RestoreStaged")).arg(safetyBackupPath);
+			if (pluginFilesFailed > 0) {
+				successText += "\n\n" + QString(obs_module_text("RestoreDialog.PluginsPartial")).arg(pluginFilesFailed);
+				successBox.setDetailedText(pluginFailureMessage);
+			}
+			successBox.setText(successText);
 			QPushButton *restartButton =
 				successBox.addButton(obs_module_text("RestoreDialog.RestartNow"), QMessageBox::AcceptRole);
 			QPushButton *laterButton =

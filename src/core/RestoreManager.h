@@ -12,6 +12,7 @@
 
 #include "EncryptedContainer.h"
 #include "ErrorKind.h"
+#include "FileCollector.h"
 #include "Manifest.h"
 
 namespace obs_backuper {
@@ -26,6 +27,11 @@ struct RestoreOptions {
 	std::filesystem::path targetDir;	  // the obs-studio directory to restore into
 	std::filesystem::path safetyBackupDir;	  // e.g. "<OBS config parent>/obs-backuper-safety"
 	int maxSafetyBackups = 5;		  // oldest safety backups beyond this count are deleted
+
+	// Plugin folders outside targetDir on this machine (Windows). Backup entries
+	// under a root's prefix are restored into its folder; entries whose prefix
+	// matches no root here are skipped. They are also part of the safety backup.
+	std::vector<PluginRoot> pluginRoots;
 
 	// Metadata for the safety backup's own manifest.json (see BackupOptions).
 	std::string pluginVersion;
@@ -95,6 +101,14 @@ struct StagedRestoreOutcome {
 	// True if a failure after plugin files had already been put in place made
 	// the restore roll targetDir back from the safety backup.
 	bool rolledBack = false;
+
+	// Plugin files in a PluginRoot folder (e.g. %ProgramData%\obs-studio\
+	// plugins) that could not be put in place -- typically because Windows
+	// denied access without administrator rights. They do not fail the restore
+	// (settings and the other plugins are restored regardless); the first
+	// failure is described in pluginFailureMessage.
+	int pluginFilesFailed = 0;
+	std::string pluginFailureMessage;
 };
 
 struct CommitOutcome {

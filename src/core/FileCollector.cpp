@@ -73,6 +73,30 @@ void CollectFromEntry(const std::filesystem::path &rootDir, const std::filesyste
 
 } // namespace
 
+bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath)
+{
+	const auto first = archiveRelativePath.begin();
+	if (first == archiveRelativePath.end())
+		return false;
+	const std::string name = first->generic_u8string();
+	return name == kSystemPluginsPrefix || name == kPortablePluginsPrefix;
+}
+
+void CollectPluginRoot(const PluginRoot &root, CollectionResult &result)
+{
+	std::error_code ec;
+	if (root.archivePrefix.empty() || !std::filesystem::is_directory(root.dir, ec) || ec)
+		return;
+
+	CollectionResult inside;
+	CollectFromEntry(root.dir, root.dir, inside);
+	for (auto &file : inside.files) {
+		file.relativePath = std::filesystem::path(root.archivePrefix) / file.relativePath;
+		result.totalSizeBytes += file.sizeBytes;
+		result.files.push_back(std::move(file));
+	}
+}
+
 CollectionResult CollectFiles(const std::filesystem::path &rootDir,
 			       const std::vector<std::string> &includedTopLevelEntries)
 {

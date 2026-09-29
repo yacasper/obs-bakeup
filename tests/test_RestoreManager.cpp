@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <fstream>
 
 using namespace obs_backuper;
@@ -938,5 +939,252 @@ TEST_CASE("PerformStagedRestore rolls plugin files back when a later plugin cann
 	CHECK(ReadFile(targetDir / "global.ini") == "size=CURRENT\n");
 	for (const auto &entry : std::filesystem::recursive_directory_iterator(targetDir / "plugins"))
 		CHECK(entry.path().filename().string().find(".bakeup-") == std::string::npos);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Plugin folders outside the obs-studio directory (Windows: %ProgramData%\obs-
+// studio\plugins). Their files sit in the archive under "system-plugins/...".
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// An archive with exactly the given entries (archive name -> content), in this
+// order, plus the manifest.
+std::filesystem::path BuildMixedArchive(const TempDirFixture &fixture,
+					const std::vector<std::pair<std::string, std::string>> &entries,
+					const std::string &name = "backups")
+{
+	CollectionResult collected;
+	for (const auto &[archiveName, content] : entries) {
+		const auto path = WriteFile(fixture.root / "mixed-src" / archiveName, content);
+		collected.files.push_back({archiveName, path, std::filesystem::file_size(path)});
+		collected.totalSizeBytes += collected.files.back().sizeBytes;
+	}
+
+	BackupOptions options;
+	options.destinationDir = fixture.root / name;
+	options.pluginVersion = "1.0.0";
+	options.obsVersion = "32.2.2";
+	options.sourceOs = "windows";
+	options.extraIncludedSections = {kSystemPluginsPrefix};
+	const auto outcome = BackupManager::CreateBackup(collected, options);
+	REQUIRE(outcome.success);
+	return outcome.archivePath;
+}
+
+RestoreOptions MakeRootedOptions(const std::filesystem::path &archive, const TempDirFixture &fixture,
+				  const std::filesystem::path &targetDir, const std::filesystem::path &systemPlugins)
+{
+	auto options = MakeRestoreOptions(archive, targetDir, fixture.root / "safety");
+	options.pluginRoots = {{kSystemPluginsPrefix, systemPlugins}};
+	return options;
+}
+
+} // namespace
+
+TEST_CASE("A staged restore puts plugin-folder files into their folder, not under targetDir",
+	  "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(fixture, {{"global.ini", "size=FROM-BACKUP\n"},
+							 {"system-plugins/foo/foo.dll", "FOO-NEW"},
+							 {"system-plugins/foo/data/locale/en-US.ini", "x=1"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto systemPlugins = fixture.root / "ProgramData" / "obs-studio" / "plugins";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+	WriteFile(systemPlugins / "foo" / "foo.dll", "FOO-OLD");
+
+	const auto staging = fixture.root / "staging";
+	const auto staged = RestoreManager::PerformStagedRestore(MakeRootedOptions(archive, fixture, targetDir, systemPlugins), staging);
+
+	REQUIRE(staged.success);
+	CHECK(staged.pluginFilesFailed == 0);
+	CHECK(ReadFile(systemPlugins / "foo" / "foo.dll") == "FOO-NEW");
+	CHECK(ReadFile(systemPlugins / "foo" / "data" / "locale" / "en-US.ini") == "x=1");
+
+	// Nothing leaked under targetDir or was left in staging for the commit.
+	CHECK_FALSE(std::filesystem::exists(targetDir / "system-plugins"));
+	CHECK_FALSE(std::filesystem::exists(staging / "system-plugins" / "foo" / "foo.dll"));
+	// Settings wait for the restart as usual.
+	CHECK(ReadFile(targetDir / "global.ini") == "size=CURRENT\n");
+	CHECK(ReadFile(staging / "global.ini") == "size=FROM-BACKUP\n");
+
+	// The later commit copies the settings and does not touch the plugin folder.
+	const auto commit = RestoreManager::CommitStagedRestore(staging, targetDir, staged.safetyBackupPath, 2, 1);
+	REQUIRE(commit.success);
+	CHECK(ReadFile(targetDir / "global.ini") == "size=FROM-BACKUP\n");
+	CHECK_FALSE(std::filesystem::exists(targetDir / "system-plugins"));
+}
+
+TEST_CASE("A staged restore never replaces this plugin's own files in a plugin folder",
+	  "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(fixture, {{"global.ini", "size=1\n"},
+							 {"system-plugins/obs-backuper/bin/64bit/obs-backuper.dll", "OLDER-BUILD"},
+							 {"system-plugins/other/other.dll", "OTHER-NEW"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto systemPlugins = fixture.root / "ProgramData" / "plugins";
+	const auto own = WriteFile(systemPlugins / "obs-backuper" / "bin" / "64bit" / "obs-backuper.dll", "RUNNING-BUILD");
+
+	const auto staged = RestoreManager::PerformStagedRestore(MakeRootedOptions(archive, fixture, targetDir, systemPlugins), fixture.root / "staging");
+
+	REQUIRE(staged.success);
+	CHECK(ReadFile(own) == "RUNNING-BUILD");
+	CHECK(ReadFile(systemPlugins / "other" / "other.dll") == "OTHER-NEW");
+}
+
+TEST_CASE("Plugin-folder files are skipped when this machine has no such folder", "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	// e.g. a Windows backup restored on macOS, or into a portable OBS.
+	const auto archive = BuildMixedArchive(
+		fixture, {{"global.ini", "size=1\n"}, {"system-plugins/foo/foo.dll", "FOO"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+
+	const auto staging = fixture.root / "staging";
+	const auto staged = RestoreManager::PerformStagedRestore(MakeRestoreOptions(archive, targetDir, fixture.root / "safety"), staging);
+
+	REQUIRE(staged.success);
+	CHECK(staged.pluginFilesFailed == 0);
+	CHECK_FALSE(std::filesystem::exists(targetDir / "system-plugins"));
+	CHECK_FALSE(std::filesystem::exists(staging / "system-plugins"));
+	CHECK(ReadFile(staging / "global.ini") == "size=1\n");
+}
+
+TEST_CASE("The direct restore also ignores plugin-folder entries", "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(
+		fixture, {{"global.ini", "size=FROM-BACKUP\n"}, {"system-plugins/foo/foo.dll", "FOO"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+
+	const auto outcome = RestoreManager::PerformRestore(MakeRestoreOptions(archive, targetDir, fixture.root / "safety"));
+
+	REQUIRE(outcome.success);
+	CHECK(ReadFile(targetDir / "global.ini") == "size=FROM-BACKUP\n");
+	CHECK_FALSE(std::filesystem::exists(targetDir / "system-plugins"));
+}
+
+TEST_CASE("The safety backup also holds the plugin folders", "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(fixture, {{"global.ini", "size=1\n"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto systemPlugins = fixture.root / "ProgramData" / "plugins";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+	WriteFile(systemPlugins / "foo" / "foo.dll", "FOO-BEFORE");
+
+	const auto staged = RestoreManager::PerformStagedRestore(MakeRootedOptions(archive, fixture, targetDir, systemPlugins), fixture.root / "staging");
+	REQUIRE(staged.success);
+
+	ZipReader reader(staged.safetyBackupPath);
+	std::string error;
+	REQUIRE(reader.Open(error));
+	std::string content;
+	REQUIRE(reader.ReadEntryToString("system-plugins/foo/foo.dll", content, error));
+	CHECK(content == "FOO-BEFORE");
+}
+
+TEST_CASE("The manifest lists the plugin-folder sections", "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(fixture, {{"global.ini", "size=1\n"}});
+
+	const auto validation = RestoreManager::ValidateArchive(archive);
+
+	REQUIRE(validation.valid);
+	const auto &sections = validation.manifest.includedSections;
+	CHECK(std::find(sections.begin(), sections.end(), "system-plugins") != sections.end());
+	CHECK(std::find(sections.begin(), sections.end(), "plugins") != sections.end());
+}
+
+#ifndef _WIN32
+TEST_CASE("A plugin folder that cannot be written does not fail the restore", "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(fixture, {{"global.ini", "size=FROM-BACKUP\n"},
+							 {"system-plugins/foo/foo.dll", "FOO-NEW"},
+							 {"system-plugins/bar/bar.dll", "BAR-NEW"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto systemPlugins = fixture.root / "ProgramData" / "plugins";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+	WriteFile(systemPlugins / "foo" / "foo.dll", "FOO-OLD");
+	// foo's folder is read-only (no administrator rights): bar can still be installed.
+	std::filesystem::permissions(systemPlugins / "foo", std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec,
+				      std::filesystem::perm_options::replace);
+
+	const auto staging = fixture.root / "staging";
+	const auto staged = RestoreManager::PerformStagedRestore(MakeRootedOptions(archive, fixture, targetDir, systemPlugins), staging);
+
+	std::filesystem::permissions(systemPlugins / "foo", std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+
+	REQUIRE(staged.success); // settings and the other plugins are still restored
+	CHECK_FALSE(staged.rolledBack);
+	CHECK(staged.pluginFilesFailed == 1);
+	CHECK(staged.pluginFailureMessage.find("foo.dll") != std::string::npos);
+	CHECK(ReadFile(systemPlugins / "foo" / "foo.dll") == "FOO-OLD");
+	CHECK(ReadFile(systemPlugins / "bar" / "bar.dll") == "BAR-NEW");
+	CHECK(ReadFile(staging / "global.ini") == "size=FROM-BACKUP\n");
+}
+
+TEST_CASE("A failure after a plugin-folder file was replaced puts it back", "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	// Archive order: the plugin-folder file is placed first, then the settings plugin fails.
+	const auto archive = BuildMixedArchive(fixture, {{"global.ini", "size=1\n"},
+							 {"system-plugins/foo/foo.dll", "FOO-FROM-BACKUP"},
+							 {"plugins/z.plugin/lib", "Z-FROM-BACKUP"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto systemPlugins = fixture.root / "ProgramData" / "plugins";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+	WriteFile(systemPlugins / "foo" / "foo.dll", "FOO-ORIGINAL");
+	const auto zDir = targetDir / "plugins" / "z.plugin";
+	WriteFile(zDir / "lib", "Z-ORIGINAL");
+	std::filesystem::permissions(zDir, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec,
+				      std::filesystem::perm_options::replace);
+
+	const auto staging = fixture.root / "staging";
+	const auto staged = RestoreManager::PerformStagedRestore(MakeRootedOptions(archive, fixture, targetDir, systemPlugins), staging);
+
+	std::filesystem::permissions(zDir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+
+	CHECK_FALSE(staged.success);
+	CHECK(staged.rolledBack);
+	CHECK(ReadFile(systemPlugins / "foo" / "foo.dll") == "FOO-ORIGINAL");
+	CHECK_FALSE(std::filesystem::exists(targetDir / "system-plugins"));
+	for (const auto &entry : std::filesystem::recursive_directory_iterator(systemPlugins))
+		CHECK(entry.path().filename().string().find(".bakeup-") == std::string::npos);
+}
+
+TEST_CASE("A rollback at the next start never writes plugin-folder files under targetDir",
+	  "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	// The safety backup holds a plugin-folder file; the marker does not carry the roots.
+	const auto safety = BuildMixedArchive(fixture, {{"global.ini", "size=OLD\n"},
+							{"basic/scenes/Record.json", R"({"scene":"old"})"},
+							{"system-plugins/foo/foo.dll", "FOO-OLD"}},
+					      "safety-src");
+
+	const auto stagingDir = fixture.root / "staging";
+	WriteFile(stagingDir / "global.ini", "size=NEW\n");
+	WriteFile(stagingDir / "basic" / "scenes" / "Record.json", R"({"scene":"new"})");
+
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=OLD\n");
+	const auto locked = WriteFile(targetDir / "basic" / "scenes" / "Record.json", R"({"scene":"old"})");
+	std::filesystem::permissions(locked, std::filesystem::perms::owner_read, std::filesystem::perm_options::replace);
+
+	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, safety, 2, 1);
+
+	std::filesystem::permissions(locked, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+
+	CHECK_FALSE(commit.success);
+	CHECK(commit.rolledBack);
+	CHECK_FALSE(std::filesystem::exists(targetDir / "system-plugins"));
 }
 #endif

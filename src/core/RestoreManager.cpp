@@ -87,6 +87,36 @@ bool IsOwnPluginPath(const std::filesystem::path &relativePath)
 	return IsPluginPath(relativePath) && NthComponent(relativePath, 1).rfind(kOwnPluginPrefix, 0) == 0;
 }
 
+// The same rule for a path inside a PluginRoot folder ("<plugin>/...").
+bool IsOwnPluginInRoot(const std::filesystem::path &pathInsideRoot)
+{
+	return NthComponent(pathInsideRoot, 0).rfind(kOwnPluginPrefix, 0) == 0;
+}
+
+// The PluginRoot an archive path belongs to (by prefix), or null if this
+// machine has no such folder.
+const PluginRoot *FindPluginRoot(const std::vector<PluginRoot> &roots, const std::filesystem::path &archiveRelativePath)
+{
+	const std::string prefix = NthComponent(archiveRelativePath, 0);
+	for (const auto &root : roots) {
+		if (AsciiFold(root.archivePrefix) == prefix)
+			return &root;
+	}
+	return nullptr;
+}
+
+// "system-plugins/foo/x.dll" -> "foo/x.dll".
+std::filesystem::path StripFirstComponent(const std::filesystem::path &path)
+{
+	std::filesystem::path out;
+	auto it = path.begin();
+	if (it != path.end())
+		++it;
+	for (; it != path.end(); ++it)
+		out /= *it;
+	return out;
+}
+
 bool FilesAreIdentical(const std::filesystem::path &a, const std::filesystem::path &b)
 {
 	std::error_code ec;
@@ -183,6 +213,22 @@ bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesyste
 		return false;
 	}
 	return true;
+}
+
+// ReplaceFileSafely with the same retry policy as the other file writes.
+bool PlaceFileWithRetries(const std::filesystem::path &source, const std::filesystem::path &destination,
+			  int maxAttempts, int retryDelayMs, std::string &errorMessage)
+{
+	std::error_code dirEc;
+	std::filesystem::create_directories(destination.parent_path(), dirEc);
+
+	for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+		if (ReplaceFileSafely(source, destination, errorMessage))
+			return true;
+		if (attempt < maxAttempts)
+			std::this_thread::sleep_for(std::chrono::milliseconds(retryDelayMs));
+	}
+	return false;
 }
 
 // Copies one file (already sitting on disk, e.g. in a staging directory) to
@@ -321,7 +367,8 @@ void RemoveFilesAddedByRestore(const std::vector<ZipReader::Entry> &safetyEntrie
 // rather than escalated -- the goal is to recover as much as possible, not to
 // fail a second time.
 void RollbackFromSafetyBackup(const std::filesystem::path &safetyBackupPath, const std::filesystem::path &targetDir,
-			      const std::vector<std::filesystem::path> &restoredPaths)
+			      const std::vector<std::filesystem::path> &restoredPaths,
+			      const std::vector<PluginRoot> &pluginRoots = {})
 {
 	ZipReader reader(safetyBackupPath);
 	std::string error;
@@ -337,8 +384,22 @@ void RollbackFromSafetyBackup(const std::filesystem::path &safetyBackupPath, con
 			continue; // never touched by the restore, see CopyWithRetries
 
 		std::string extractError;
-		const std::filesystem::path destination = targetDir / entry.relativePath;
-		if (IsPluginPath(entry.relativePath)) {
+		std::filesystem::path destination = targetDir / entry.relativePath;
+		bool isPlugin = IsPluginPath(entry.relativePath);
+		if (IsPluginRootEntry(entry.relativePath)) {
+			// A file from a plugin folder outside targetDir. Without a matching
+			// folder here (the pending-restore marker does not carry them) it is
+			// left alone rather than written under targetDir.
+			const PluginRoot *root = FindPluginRoot(pluginRoots, entry.relativePath);
+			if (!root)
+				continue;
+			const auto inside = StripFirstComponent(entry.relativePath);
+			if (IsOwnPluginInRoot(inside))
+				continue;
+			destination = root->dir / inside;
+			isPlugin = true;
+		}
+		if (isPlugin) {
 			// Never overwrite a possibly loaded plugin in place.
 			const auto temp = WithSuffix(destination, kRollbackTempSuffix);
 			if (reader.ExtractEntryToFile(entry.relativePath.generic_u8string(), temp, extractError))
@@ -399,7 +460,9 @@ std::filesystem::path CreateSafetyBackup(const RestoreOptions &options, std::str
 	safetyOptions.archiveBaseNamePrefix = kSafetyBackupPrefix;
 	safetyOptions.appendObsVersionToFileName = false;
 
-	const auto collectedCurrentConfig = CollectFiles(options.targetDir);
+	auto collectedCurrentConfig = CollectFiles(options.targetDir);
+	for (const auto &root : options.pluginRoots)
+		CollectPluginRoot(root, collectedCurrentConfig);
 	const auto safetyOutcome = BackupManager::CreateBackup(collectedCurrentConfig, safetyOptions, options.onSafetyBackupProgress);
 	if (!safetyOutcome.success) {
 		errorMessage = "failed to create safety backup before restoring: " + safetyOutcome.errorMessage;
@@ -607,7 +670,8 @@ RestoreOutcome RestoreManager::PerformRestore(const RestoreOptions &options, con
 
 	std::vector<ZipReader::Entry> entries;
 	for (auto &entry : reader.ListEntries()) {
-		if (!IsManifestEntry(entry.relativePath))
+		// Plugin folders outside targetDir are only handled by the staged restore.
+		if (!IsManifestEntry(entry.relativePath) && !IsPluginRootEntry(entry.relativePath))
 			entries.push_back(std::move(entry));
 	}
 
@@ -694,6 +758,7 @@ StagedRestoreOutcome RestoreManager::PerformStagedRestore(const RestoreOptions &
 	// file OBS may have loaded, so doing it while OBS runs is safe. Settings
 	// still wait for the restart (see PerformStagedRestore's doc comment).
 	std::vector<std::filesystem::path> appliedPluginPaths;
+	bool placedInPluginRoots = false; // any file written into a PluginRoot folder
 
 	const std::size_t total = entries.size();
 	for (std::size_t i = 0; i < total; ++i) {
@@ -702,6 +767,39 @@ StagedRestoreOutcome RestoreManager::PerformStagedRestore(const RestoreOptions &
 		if (onProgress)
 			onProgress(i + 1, total, entry.relativePath);
 
+		// Plugins in a folder outside targetDir (Windows: %ProgramData%\obs-
+		// studio\plugins). Best effort: Windows may refuse the write without
+		// administrator rights, and that must not fail the whole restore.
+		if (IsPluginRootEntry(entry.relativePath)) {
+			const PluginRoot *root = FindPluginRoot(options.pluginRoots, entry.relativePath);
+			if (!root)
+				continue; // no such folder on this machine (e.g. a backup from another OS)
+			const auto inside = StripFirstComponent(entry.relativePath);
+			if (IsOwnPluginInRoot(inside))
+				continue;
+
+			const auto destination = root->dir / inside;
+			std::string placeError;
+			bool placed = ExtractWithRetries(reader, entry, stagingDir, options.fileWriteMaxAttempts,
+							  options.fileWriteRetryDelayMs, placeError);
+			if (placed) {
+				placed = PlaceFileWithRetries(stagingDir / entry.relativePath, destination,
+							      options.fileWriteMaxAttempts, options.fileWriteRetryDelayMs,
+							      placeError);
+				if (placed)
+					placedInPluginRoots = true;
+			}
+			std::error_code removeEc;
+			std::filesystem::remove(stagingDir / entry.relativePath, removeEc);
+
+			if (!placed) {
+				if (outcome.pluginFilesFailed == 0)
+					outcome.pluginFailureMessage = destination.string() + ": " + placeError;
+				++outcome.pluginFilesFailed;
+			}
+			continue;
+		}
+
 		if (IsOwnPluginPath(entry.relativePath))
 			continue; // the running copy of this plugin is never replaced
 
@@ -709,28 +807,21 @@ StagedRestoreOutcome RestoreManager::PerformStagedRestore(const RestoreOptions &
 		bool ok = ExtractWithRetries(reader, entry, stagingDir, options.fileWriteMaxAttempts,
 					      options.fileWriteRetryDelayMs, extractError);
 		if (ok && IsPluginPath(entry.relativePath)) {
-			const auto staged = stagingDir / entry.relativePath;
-			const auto destination = options.targetDir / entry.relativePath;
-			std::error_code dirEc2;
-			std::filesystem::create_directories(destination.parent_path(), dirEc2);
-			for (int attempt = 1; attempt <= options.fileWriteMaxAttempts; ++attempt) {
-				ok = ReplaceFileSafely(staged, destination, extractError);
-				if (ok || attempt == options.fileWriteMaxAttempts)
-					break;
-				std::this_thread::sleep_for(std::chrono::milliseconds(options.fileWriteRetryDelayMs));
-			}
+			ok = PlaceFileWithRetries(stagingDir / entry.relativePath, options.targetDir / entry.relativePath,
+						  options.fileWriteMaxAttempts, options.fileWriteRetryDelayMs, extractError);
 			if (ok)
 				appliedPluginPaths.push_back(entry.relativePath);
 			std::error_code removeEc;
-			std::filesystem::remove(staged, removeEc); // already in place, nothing to commit later
+			std::filesystem::remove(stagingDir / entry.relativePath, removeEc); // in place, nothing to commit later
 		}
 
 		if (!ok) {
 			// Settings were not touched. Plugin files that were already put in
 			// place are put back from the safety backup, so the outcome is
 			// all-or-nothing.
-			if (!appliedPluginPaths.empty()) {
-				RollbackFromSafetyBackup(outcome.safetyBackupPath, options.targetDir, appliedPluginPaths);
+			if (!appliedPluginPaths.empty() || placedInPluginRoots) {
+				RollbackFromSafetyBackup(outcome.safetyBackupPath, options.targetDir, appliedPluginPaths,
+							  options.pluginRoots);
 				outcome.rolledBack = true;
 			}
 			std::error_code cleanupEc;
