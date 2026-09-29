@@ -593,7 +593,9 @@ TEST_CASE("CommitStagedRestore leaves an identical plugin file untouched", "[Res
 	REQUIRE(commit.success);
 	CHECK(ReadFile(existing) == "SAME-CONTENT");
 	// Not rewritten: a loaded library must not be touched when nothing changed.
-	CHECK(std::filesystem::last_write_time(existing) == before);
+	// (Compared outside CHECK: Catch2 cannot print a file_time_type on libc++.)
+	const bool timestampUnchanged = std::filesystem::last_write_time(existing) == before;
+	CHECK(timestampUnchanged);
 }
 
 TEST_CASE("CommitStagedRestore never touches this plugin's own files", "[RestoreManager][plugins]")
