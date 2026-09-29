@@ -22,7 +22,9 @@ Open it from **Tools → OBS Bakeup**.
 | Profiles and scene collections (`basic/`) | Crash reports |
 | Installed plugins (the `plugins/` folder) | Anything else OBS keeps internally (caches, temp files) |
 | Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins) | Plugins installed system-wide, outside your OBS user folder |
-| Themes | |
+| Themes | Your own files outside the OBS folder: images, videos, audio, fonts, recordings and other media that scenes use |
+
+> 🖼️ **Media files are not part of a backup.** Scenes refer to images, videos and other files by their path on disk, so after restoring on a new computer copy those files back to the same locations, or re-link them in the affected sources.
 
 Every archive carries a `manifest.json` (plugin, OBS and OS versions, creation time), which is used to validate a backup and to warn you, for example, when it was made on a different operating system.
 
