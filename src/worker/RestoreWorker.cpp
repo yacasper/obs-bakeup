@@ -7,6 +7,7 @@
 #include <obs-module.h>
 
 #include "../core/Crypto.h"
+#include "../core/PathUtf8.h"
 #include "../plugin-support.h"
 
 RestoreWorker::RestoreWorker(obs_backuper::RestoreOptions options, std::filesystem::path stagingDir, QObject *parent)
@@ -19,12 +20,12 @@ RestoreWorker::RestoreWorker(obs_backuper::RestoreOptions options, std::filesyst
 void RestoreWorker::run()
 {
 	obs_log(LOG_INFO, "restore: staging archive \"%s\" into \"%s\" (target \"%s\")",
-		options_.archivePath.string().c_str(), stagingDir_.string().c_str(), options_.targetDir.string().c_str());
+		obs_backuper::PathToUtf8(options_.archivePath).c_str(), obs_backuper::PathToUtf8(stagingDir_).c_str(), obs_backuper::PathToUtf8(options_.targetDir).c_str());
 
 	options_.onSafetyBackupProgress = [this](std::size_t current, std::size_t total,
 						  const std::filesystem::path &currentFile) {
 		emit safetyBackupProgressChanged(static_cast<qint64>(current), static_cast<qint64>(total),
-						  QString::fromStdString(currentFile.generic_string()));
+						  QString::fromStdString(obs_backuper::GenericPathToUtf8(currentFile)));
 	};
 	options_.onDecryptProgress = [this](std::uint64_t done, std::uint64_t total) {
 		emit decryptionProgressChanged(static_cast<qint64>(done), static_cast<qint64>(total));
@@ -34,7 +35,7 @@ void RestoreWorker::run()
 		options_, stagingDir_,
 		[this](std::size_t current, std::size_t total, const std::filesystem::path &currentFile) {
 			emit progressChanged(static_cast<qint64>(current), static_cast<qint64>(total),
-					      QString::fromStdString(currentFile.generic_string()));
+					      QString::fromStdString(obs_backuper::GenericPathToUtf8(currentFile)));
 		});
 
 	// The password is not needed past this point.
@@ -46,14 +47,14 @@ void RestoreWorker::run()
 
 	if (outcome.success) {
 		obs_log(LOG_INFO, "restore staged successfully (safety backup: \"%s\"); will be applied on next OBS launch",
-			outcome.safetyBackupPath.string().c_str());
+			obs_backuper::PathToUtf8(outcome.safetyBackupPath).c_str());
 	} else {
 		obs_log(LOG_ERROR, "failed to stage restore: %s", outcome.errorMessage.c_str());
 	}
 
 	emit stagingFinished(outcome.success, QString::fromStdString(outcome.errorMessage),
 			      static_cast<int>(outcome.errorKind),
-			      QString::fromStdString(outcome.stagingDir.string()),
-			      QString::fromStdString(outcome.safetyBackupPath.string()), outcome.pluginFilesFailed,
+			      QString::fromStdString(obs_backuper::PathToUtf8(outcome.stagingDir)),
+			      QString::fromStdString(obs_backuper::PathToUtf8(outcome.safetyBackupPath)), outcome.pluginFilesFailed,
 			      QString::fromStdString(outcome.pluginFailureMessage));
 }

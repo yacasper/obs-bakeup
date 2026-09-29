@@ -3,6 +3,7 @@
 // Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
 
 #include "FileCollector.h"
+#include "PathUtf8.h"
 
 #include <algorithm>
 #include <system_error>
@@ -17,7 +18,7 @@ namespace {
 
 bool IsIncluded(const std::filesystem::path &entryPath, const std::vector<std::string> &includedTopLevelEntries)
 {
-	const std::string name = entryPath.filename().string();
+	const std::string name = PathToUtf8(entryPath.filename());
 	return std::find(includedTopLevelEntries.begin(), includedTopLevelEntries.end(), name) !=
 	       includedTopLevelEntries.end();
 }

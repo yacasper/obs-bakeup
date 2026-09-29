@@ -3,6 +3,7 @@
 // Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
 
 #include "RestoreManager.h"
+#include "PathUtf8.h"
 
 #include "BackupManager.h"
 #include "FileCollector.h"
@@ -29,7 +30,7 @@ constexpr const char *kDecryptedTempSuffix = ".tmp";
 
 bool IsManifestEntry(const std::filesystem::path &relativePath)
 {
-	return relativePath.generic_string() == kManifestEntryName;
+	return GenericPathToUtf8(relativePath) == kManifestEntryName;
 }
 
 // Extracts one archive entry to destDir, retrying a locked/unwritable
@@ -153,7 +154,10 @@ bool FilesAreIdentical(const std::filesystem::path &a, const std::filesystem::pa
 
 std::filesystem::path WithSuffix(const std::filesystem::path &path, const char *suffix)
 {
-	return std::filesystem::path(path.string() + suffix);
+	// suffix is plain ASCII, so appending it in the native encoding is lossless.
+	std::filesystem::path result = path;
+	result += suffix;
+	return result;
 }
 
 // Gives `destination` the same permission bits as `source` (macOS/Linux; on
@@ -441,7 +445,7 @@ void RotateSafetyBackups(const std::filesystem::path &safetyBackupDir, int maxCo
 		if (ec)
 			break;
 
-		const std::string name = entry.path().filename().string();
+		const std::string name = PathToUtf8(entry.path().filename());
 		if (entry.is_regular_file() && name.rfind(kSafetyBackupPrefix, 0) == 0)
 			backups.push_back(entry.path());
 	}
@@ -603,7 +607,7 @@ void RestoreManager::RemoveStaleTemporaryFiles(const std::filesystem::path &dir)
 	for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
 		if (ec)
 			break;
-		const std::string name = entry.path().filename().string();
+		const std::string name = PathToUtf8(entry.path().filename());
 		if (entry.is_regular_file() && name.rfind(kDecryptedTempPrefix, 0) == 0 &&
 		    name.size() >= std::string(kDecryptedTempSuffix).size() &&
 		    name.compare(name.size() - std::string(kDecryptedTempSuffix).size(), std::string::npos,
@@ -629,7 +633,7 @@ void RestoreManager::RemovePluginReplacementLeftovers(const std::filesystem::pat
 		std::error_code fileEc;
 		if (!it->is_regular_file(fileEc) || fileEc)
 			continue;
-		const std::string name = it->path().filename().string();
+		const std::string name = PathToUtf8(it->path().filename());
 		for (const char *suffix : {kReplacementOldSuffix, kReplacementNewSuffix, kRollbackTempSuffix}) {
 			const std::string s = suffix;
 			if (name.size() > s.size() && name.compare(name.size() - s.size(), std::string::npos, s) == 0) {
@@ -697,7 +701,7 @@ RestoreOutcome RestoreManager::PerformRestore(const RestoreOptions &options, con
 		std::string extractError;
 		if (!ExtractWithRetries(reader, entry, options.targetDir, options.fileWriteMaxAttempts,
 					 options.fileWriteRetryDelayMs, extractError)) {
-			outcome.errorMessage = "failed to restore \"" + entry.relativePath.generic_string() +
+			outcome.errorMessage = "failed to restore \"" + GenericPathToUtf8(entry.relativePath) +
 						"\": " + extractError;
 			outcome.errorKind = ErrorKind::RestoreExtractFailed;
 			std::vector<std::filesystem::path> restoredPaths;
@@ -806,7 +810,7 @@ StagedRestoreOutcome RestoreManager::PerformStagedRestore(const RestoreOptions &
 
 			if (!placed) {
 				if (outcome.pluginFilesFailed == 0)
-					outcome.pluginFailureMessage = destination.string() + ": " + placeError;
+					outcome.pluginFailureMessage = PathToUtf8(destination) + ": " + placeError;
 				++outcome.pluginFilesFailed;
 			}
 			continue;
@@ -839,7 +843,7 @@ StagedRestoreOutcome RestoreManager::PerformStagedRestore(const RestoreOptions &
 			std::error_code cleanupEc;
 			std::filesystem::remove_all(stagingDir, cleanupEc);
 			outcome.errorMessage =
-				"failed to stage \"" + entry.relativePath.generic_string() + "\": " + extractError;
+				"failed to stage \"" + GenericPathToUtf8(entry.relativePath) + "\": " + extractError;
 			outcome.errorKind = ErrorKind::RestoreExtractFailed;
 			return outcome;
 		}
@@ -869,7 +873,7 @@ CommitOutcome RestoreManager::CommitStagedRestore(const std::filesystem::path &s
 		std::string copyError;
 		if (!CopyWithRetries(file.absolutePath, targetDir, file.relativePath, fileWriteMaxAttempts,
 				      fileWriteRetryDelayMs, copyError)) {
-			outcome.errorMessage = "failed to apply staged restore for \"" + file.relativePath.generic_string() +
+			outcome.errorMessage = "failed to apply staged restore for \"" + GenericPathToUtf8(file.relativePath) +
 						"\": " + copyError;
 			outcome.errorKind = ErrorKind::RestoreApplyFailed;
 			if (!safetyBackupPath.empty()) {
@@ -914,18 +918,18 @@ bool RestoreManager::WritePendingRestoreMarker(const std::filesystem::path &mark
 
 	std::ofstream out(markerPath, std::ios::binary | std::ios::trunc);
 	if (!out.is_open()) {
-		errorMessage = "failed to open pending-restore marker for writing: " + markerPath.string();
+		errorMessage = "failed to open pending-restore marker for writing: " + PathToUtf8(markerPath);
 		return false;
 	}
 
-	out << kStagingDirKey << '=' << EscapeMarkerValue(marker.stagingDir.string()) << '\n';
-	out << kTargetDirKey << '=' << EscapeMarkerValue(marker.targetDir.string()) << '\n';
-	out << kSafetyBackupPathKey << '=' << EscapeMarkerValue(marker.safetyBackupPath.string()) << '\n';
+	out << kStagingDirKey << '=' << EscapeMarkerValue(PathToUtf8(marker.stagingDir)) << '\n';
+	out << kTargetDirKey << '=' << EscapeMarkerValue(PathToUtf8(marker.targetDir)) << '\n';
+	out << kSafetyBackupPathKey << '=' << EscapeMarkerValue(PathToUtf8(marker.safetyBackupPath)) << '\n';
 	out << kFileWriteMaxAttemptsKey << '=' << marker.fileWriteMaxAttempts << '\n';
 	out << kFileWriteRetryDelayMsKey << '=' << marker.fileWriteRetryDelayMs << '\n';
 
 	if (!out.good()) {
-		errorMessage = "failed to write pending-restore marker: " + markerPath.string();
+		errorMessage = "failed to write pending-restore marker: " + PathToUtf8(markerPath);
 		return false;
 	}
 	return true;
@@ -936,7 +940,7 @@ bool RestoreManager::ReadPendingRestoreMarker(const std::filesystem::path &marke
 {
 	std::ifstream in(markerPath, std::ios::binary);
 	if (!in.is_open()) {
-		errorMessage = "no pending-restore marker at: " + markerPath.string();
+		errorMessage = "no pending-restore marker at: " + PathToUtf8(markerPath);
 		return false;
 	}
 
@@ -951,11 +955,11 @@ bool RestoreManager::ReadPendingRestoreMarker(const std::filesystem::path &marke
 		const std::string value = line.substr(separator + 1);
 
 		if (key == kStagingDirKey)
-			marker.stagingDir = value;
+			marker.stagingDir = PathFromUtf8(value);
 		else if (key == kTargetDirKey)
-			marker.targetDir = value;
+			marker.targetDir = PathFromUtf8(value);
 		else if (key == kSafetyBackupPathKey)
-			marker.safetyBackupPath = value;
+			marker.safetyBackupPath = PathFromUtf8(value);
 		else if (key == kFileWriteMaxAttemptsKey)
 			marker.fileWriteMaxAttempts = std::atoi(value.c_str());
 		else if (key == kFileWriteRetryDelayMsKey)
@@ -963,7 +967,7 @@ bool RestoreManager::ReadPendingRestoreMarker(const std::filesystem::path &marke
 	}
 
 	if (marker.stagingDir.empty() || marker.targetDir.empty()) {
-		errorMessage = "pending-restore marker is missing required fields: " + markerPath.string();
+		errorMessage = "pending-restore marker is missing required fields: " + PathToUtf8(markerPath);
 		return false;
 	}
 

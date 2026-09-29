@@ -3,6 +3,7 @@
 // Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
 
 #include "BackupManager.h"
+#include "PathUtf8.h"
 
 #include "SecureFile.h"
 #include "ZipArchive.h"
@@ -43,7 +44,7 @@ bool DirectoryIsWritable(const std::filesystem::path &dir, std::string &errorMes
 	std::error_code ec;
 	if (!std::filesystem::exists(dir, ec) || ec) {
 		if (!std::filesystem::create_directories(dir, ec) || ec) {
-			errorMessage = "destination directory does not exist and could not be created: " + dir.string();
+			errorMessage = "destination directory does not exist and could not be created: " + PathToUtf8(dir);
 			return false;
 		}
 	}
@@ -51,7 +52,7 @@ bool DirectoryIsWritable(const std::filesystem::path &dir, std::string &errorMes
 	const auto probePath = dir / ".obs-backuper-write-check.tmp";
 	std::ofstream probe(probePath, std::ios::binary);
 	if (!probe.is_open()) {
-		errorMessage = "no write permission for destination directory: " + dir.string();
+		errorMessage = "no write permission for destination directory: " + PathToUtf8(dir);
 		return false;
 	}
 	probe.close();
@@ -116,8 +117,10 @@ std::filesystem::path BackupManager::ResolveUniqueBackupPath(const std::filesyst
 	const std::filesystem::path extension = candidate.extension();
 
 	for (int suffix = 1;; ++suffix) {
-		const std::filesystem::path attempt =
-			destinationDir / (stem.string() + "_" + std::to_string(suffix) + extension.string());
+		std::filesystem::path name = stem;
+		name += "_" + std::to_string(suffix); // ASCII, so appending natively is lossless
+		name += extension;
+		const std::filesystem::path attempt = destinationDir / name;
 		if (!std::filesystem::exists(attempt, ec))
 			return attempt;
 	}
@@ -160,7 +163,7 @@ BackupOutcome BackupManager::CreateBackup(const CollectionResult &collected, con
 		zipPath = MakeRandomTempPath(options.destinationDir, ".obs-backuper-plain-", ".tmp");
 		std::FILE *created = OpenForWrite(zipPath, /*ownerOnly=*/true, /*exclusive=*/true);
 		if (created == nullptr) {
-			outcome.errorMessage = "failed to create temporary archive in: " + options.destinationDir.string();
+			outcome.errorMessage = "failed to create temporary archive in: " + PathToUtf8(options.destinationDir);
 			outcome.errorKind = ErrorKind::DestinationNotWritable;
 			return outcome;
 		}

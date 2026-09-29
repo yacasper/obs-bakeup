@@ -7,6 +7,7 @@
 
 #include "ObsConfigPathProvider.h"
 #include "core/RestoreManager.h"
+#include "core/PathUtf8.h"
 #include "plugin-support.h"
 #include "ui/BackupDialog.h"
 #include "ui/ErrorDialog.h"
@@ -79,7 +80,7 @@ static void CommitPendingRestoreIfAny()
 		return; // nothing pending -- the common case
 
 	obs_log(LOG_INFO, "found a pending restore (staged in \"%s\"), applying it to \"%s\"",
-		marker.stagingDir.string().c_str(), marker.targetDir.string().c_str());
+		obs_backuper::PathToUtf8(marker.stagingDir).c_str(), obs_backuper::PathToUtf8(marker.targetDir).c_str());
 
 	const auto commit = obs_backuper::RestoreManager::CommitStagedRestore(
 		marker.stagingDir, marker.targetDir, marker.safetyBackupPath, marker.fileWriteMaxAttempts,

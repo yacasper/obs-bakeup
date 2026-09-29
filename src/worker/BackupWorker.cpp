@@ -7,6 +7,7 @@
 #include <obs-module.h>
 
 #include "../core/Crypto.h"
+#include "../core/PathUtf8.h"
 #include "../plugin-support.h"
 
 BackupWorker::BackupWorker(obs_backuper::CollectionResult collected, obs_backuper::BackupOptions options, QObject *parent)
@@ -19,7 +20,7 @@ BackupWorker::BackupWorker(obs_backuper::CollectionResult collected, obs_backupe
 void BackupWorker::run()
 {
 	obs_log(LOG_INFO, "backup started: %zu file(s), destination \"%s\", password-protected: %s",
-		collected_.files.size(), options_.destinationDir.string().c_str(),
+		collected_.files.size(), obs_backuper::PathToUtf8(options_.destinationDir).c_str(),
 		options_.password.empty() ? "no" : "yes");
 
 	options_.onEncryptProgress = [this](std::uint64_t done, std::uint64_t total) {
@@ -30,7 +31,7 @@ void BackupWorker::run()
 		collected_, options_,
 		[this](std::size_t current, std::size_t total, const std::filesystem::path &currentFile) {
 			emit progressChanged(static_cast<qint64>(current), static_cast<qint64>(total),
-					      QString::fromStdString(currentFile.generic_string()));
+					      QString::fromStdString(obs_backuper::GenericPathToUtf8(currentFile)));
 		});
 
 	// The password is not needed past this point.
@@ -39,21 +40,21 @@ void BackupWorker::run()
 	QStringList warnings;
 	for (const auto &warning : outcome.warnings) {
 		const QString line =
-			QString::fromStdString(warning.relativePath.generic_string() + ": " + warning.message);
+			QString::fromStdString(obs_backuper::GenericPathToUtf8(warning.relativePath) + ": " + warning.message);
 		warnings.append(line);
-		obs_log(LOG_WARNING, "backup: skipped file \"%s\": %s", warning.relativePath.string().c_str(),
+		obs_log(LOG_WARNING, "backup: skipped file \"%s\": %s", obs_backuper::PathToUtf8(warning.relativePath).c_str(),
 			warning.message.c_str());
 	}
 
 	if (outcome.success) {
 		obs_log(LOG_INFO, "backup finished successfully: \"%s\" (%llu bytes), %zu warning(s)",
-			outcome.archivePath.string().c_str(),
+			obs_backuper::PathToUtf8(outcome.archivePath).c_str(),
 			static_cast<unsigned long long>(outcome.archiveSizeBytes), outcome.warnings.size());
 	} else {
 		obs_log(LOG_ERROR, "backup failed: %s", outcome.errorMessage.c_str());
 	}
 
-	emit backupFinished(outcome.success, QString::fromStdString(outcome.archivePath.string()),
+	emit backupFinished(outcome.success, QString::fromStdString(obs_backuper::PathToUtf8(outcome.archivePath)),
 			     static_cast<qint64>(outcome.archiveSizeBytes),
 			     QString::fromStdString(outcome.errorMessage), static_cast<int>(outcome.errorKind), warnings);
 }

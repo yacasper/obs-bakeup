@@ -3,6 +3,7 @@
 // Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
 
 #include "EncryptedContainer.h"
+#include "PathUtf8.h"
 
 #include "SecureFile.h"
 
@@ -241,7 +242,7 @@ ContainerResult ReadContainerHeader(const std::filesystem::path &path, Container
 {
 	std::FILE *file = OpenForRead(path);
 	if (file == nullptr)
-		return Fail(ErrorKind::InvalidArchive, "failed to open file: " + path.string());
+		return Fail(ErrorKind::InvalidArchive, "failed to open file: " + PathToUtf8(path));
 	FileCloser closer(file);
 
 	HeaderBytes raw{};
@@ -266,7 +267,7 @@ ContainerResult EncryptFile(const std::filesystem::path &zipPath, const std::fil
 
 	std::FILE *in = OpenForRead(zipPath);
 	if (in == nullptr)
-		return Fail(ErrorKind::EncryptionFailed, "failed to open input archive: " + zipPath.string());
+		return Fail(ErrorKind::EncryptionFailed, "failed to open input archive: " + PathToUtf8(zipPath));
 	FileCloser inCloser(in);
 
 	ContainerHeader header;
@@ -283,7 +284,7 @@ ContainerResult EncryptFile(const std::filesystem::path &zipPath, const std::fil
 
 	std::FILE *outFile = OpenForWrite(containerPath, /*ownerOnly=*/false);
 	if (outFile == nullptr)
-		return Fail(ErrorKind::EncryptionFailed, "failed to create output file: " + containerPath.string());
+		return Fail(ErrorKind::EncryptionFailed, "failed to create output file: " + PathToUtf8(containerPath));
 	FileCloser outCloser(outFile);
 
 	const HeaderBytes headerBytes = SerializeHeader(header);
@@ -362,7 +363,7 @@ ContainerResult DecryptFile(const std::filesystem::path &containerPath, const st
 
 	std::FILE *in = OpenForRead(containerPath);
 	if (in == nullptr)
-		return Fail(ErrorKind::InvalidArchive, "failed to open file: " + containerPath.string());
+		return Fail(ErrorKind::InvalidArchive, "failed to open file: " + PathToUtf8(containerPath));
 	FileCloser inCloser(in);
 
 	HeaderBytes headerBytes{};
@@ -376,7 +377,7 @@ ContainerResult DecryptFile(const std::filesystem::path &containerPath, const st
 
 	std::FILE *outFile = OpenForWrite(zipPath, /*ownerOnly=*/true);
 	if (outFile == nullptr)
-		return Fail(ErrorKind::EncryptionFailed, "failed to create output file: " + zipPath.string());
+		return Fail(ErrorKind::EncryptionFailed, "failed to create output file: " + PathToUtf8(zipPath));
 	FileCloser outCloser(outFile);
 
 	ProgressThrottle progress(onProgress, totalPlain);

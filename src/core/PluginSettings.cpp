@@ -3,6 +3,7 @@
 // Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
 
 #include "PluginSettings.h"
+#include "PathUtf8.h"
 
 #include <fstream>
 #include <system_error>
@@ -69,7 +70,7 @@ bool PluginSettings::Save(const std::filesystem::path &path, std::string &errorM
 
 	std::ofstream out(path, std::ios::binary | std::ios::trunc);
 	if (!out.is_open()) {
-		errorMessage = "failed to open plugin settings for writing: " + path.string();
+		errorMessage = "failed to open plugin settings for writing: " + PathToUtf8(path);
 		return false;
 	}
 
@@ -80,7 +81,7 @@ bool PluginSettings::Save(const std::filesystem::path &path, std::string &errorM
 	out.flush();
 
 	if (!out.good()) {
-		errorMessage = "failed to write plugin settings: " + path.string();
+		errorMessage = "failed to write plugin settings: " + PathToUtf8(path);
 		return false;
 	}
 	return true;

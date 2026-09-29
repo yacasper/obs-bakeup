@@ -3,6 +3,7 @@
 // Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
 
 #include "ObsConfigPathProvider.h"
+#include "core/PathUtf8.h"
 
 #include <util/platform.h>
 
@@ -27,7 +28,7 @@ namespace {
 
 std::filesystem::path ExecutableDir()
 {
-	return std::filesystem::path(QCoreApplication::applicationDirPath().toStdString());
+	return PathFromUtf8(QCoreApplication::applicationDirPath().toStdString());
 }
 
 // Portable mode exists on Windows only (official macOS builds don't enable
@@ -56,7 +57,7 @@ std::filesystem::path GetObsDataDir()
 	// os_get_config_path() returns the length of the path (or -1 on failure),
 	// not zero on success.
 	if (os_get_config_path(buffer, sizeof(buffer), "obs-studio") > 0 && buffer[0] != '\0')
-		obsConfigPath = std::filesystem::path(buffer);
+		obsConfigPath = PathFromUtf8(buffer); // OBS returns UTF-8
 
 	return ResolveObsDataDir(kCurrentPlatform, obsConfigPath, ExecutableDir(), RunningPortable());
 }
@@ -73,7 +74,7 @@ std::vector<PluginRoot> GetExtraPluginRoots()
 	} else {
 		char buffer[4096] = {};
 		if (os_get_program_data_path(buffer, sizeof(buffer), "obs-studio/plugins") > 0 && buffer[0] != '\0')
-			roots.push_back({kSystemPluginsPrefix, std::filesystem::path(buffer)});
+			roots.push_back({kSystemPluginsPrefix, PathFromUtf8(buffer)});
 	}
 #endif
 

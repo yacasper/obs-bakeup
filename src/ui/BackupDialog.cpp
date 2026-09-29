@@ -11,6 +11,7 @@
 #include "../ObsConfigPathProvider.h"
 #include "../core/BackupManager.h"
 #include "../core/FileCollector.h"
+#include "../core/PathUtf8.h"
 #include "../core/RestoreManager.h"
 #include "../plugin-support.h"
 #include "../worker/BackupWorker.h"
@@ -348,7 +349,7 @@ void BackupDialog::onCreateBackupClicked()
 
 	obs_log(LOG_INFO, "collected %zu files (%.2f MB) for backup", collected.files.size(), totalMegabytes);
 	for (const auto &file : collected.files)
-		obs_log(LOG_DEBUG, "  %s", file.relativePath.string().c_str());
+		obs_log(LOG_DEBUG, "  %s", obs_backuper::PathToUtf8(file.relativePath).c_str());
 
 	if (collected.files.empty()) {
 		QMessageBox::warning(this, obs_module_text("BackupDialog.Title"),
@@ -377,7 +378,7 @@ void BackupDialog::onCreateBackupClicked()
 	obs_backuper::BackupOptions options;
 	options.password = password;
 	obs_backuper::crypto::SecureWipe(password);
-	options.destinationDir = std::filesystem::path(destDir.toStdString());
+	options.destinationDir = obs_backuper::PathFromUtf8(destDir.toStdString());
 	options.pluginVersion = PLUGIN_VERSION;
 	options.sourceOs = CurrentSourceOs();
 	options.sourceOsVersion = QSysInfo::productVersion().toStdString();
@@ -452,7 +453,7 @@ void BackupDialog::onRestoreBackupClicked()
 	if (archivePathStr.isEmpty())
 		return;
 
-	const std::filesystem::path archivePath(archivePathStr.toStdString());
+	const std::filesystem::path archivePath = obs_backuper::PathFromUtf8(archivePathStr.toStdString());
 
 	// For a password-protected file this only reads the header (no password
 	// yet); the full check runs in unlockEncryptedArchive() below.
@@ -566,9 +567,9 @@ void BackupDialog::onRestoreBackupClicked()
 			}
 
 			obs_backuper::PendingRestoreMarker marker;
-			marker.stagingDir = std::filesystem::path(stagingDirStr.toStdString());
+			marker.stagingDir = obs_backuper::PathFromUtf8(stagingDirStr.toStdString());
 			marker.targetDir = obs_backuper::GetObsDataDir();
-			marker.safetyBackupPath = std::filesystem::path(safetyBackupPath.toStdString());
+			marker.safetyBackupPath = obs_backuper::PathFromUtf8(safetyBackupPath.toStdString());
 			marker.fileWriteMaxAttempts = options.fileWriteMaxAttempts;
 			marker.fileWriteRetryDelayMs = options.fileWriteRetryDelayMs;
 

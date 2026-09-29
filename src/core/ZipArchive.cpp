@@ -3,6 +3,7 @@
 // Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
 
 #include "ZipArchive.h"
+#include "PathUtf8.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -104,7 +105,7 @@ bool ZipArchive::Open(std::string &errorMessage)
 
 	file_ = OpenNative(zipPath_, L"wb", "wb");
 	if (!file_) {
-		errorMessage = "failed to create archive file: " + zipPath_.string();
+		errorMessage = "failed to create archive file: " + PathToUtf8(zipPath_);
 		return false;
 	}
 
@@ -124,7 +125,7 @@ bool ZipArchive::AddFile(const std::filesystem::path &absoluteSourcePath, const 
 {
 	std::FILE *source = OpenNative(absoluteSourcePath, L"rb", "rb");
 	if (!source) {
-		errorMessage = "failed to open source file: " + absoluteSourcePath.string();
+		errorMessage = "failed to open source file: " + PathToUtf8(absoluteSourcePath);
 		return false;
 	}
 
@@ -134,7 +135,7 @@ bool ZipArchive::AddFile(const std::filesystem::path &absoluteSourcePath, const 
 
 	if (size < 0) {
 		std::fclose(source);
-		errorMessage = "failed to determine file size: " + absoluteSourcePath.string();
+		errorMessage = "failed to determine file size: " + PathToUtf8(absoluteSourcePath);
 		return false;
 	}
 
@@ -180,7 +181,7 @@ bool ZipReader::Open(std::string &errorMessage)
 
 	file_ = OpenNative(zipPath_, L"rb", "rb");
 	if (!file_) {
-		errorMessage = "failed to open archive file: " + zipPath_.string();
+		errorMessage = "failed to open archive file: " + PathToUtf8(zipPath_);
 		return false;
 	}
 
@@ -189,7 +190,7 @@ bool ZipReader::Open(std::string &errorMessage)
 	Fseek64(file_, 0, SEEK_SET);
 
 	if (size < 0) {
-		errorMessage = "failed to determine archive size: " + zipPath_.string();
+		errorMessage = "failed to determine archive size: " + PathToUtf8(zipPath_);
 		std::fclose(file_);
 		file_ = nullptr;
 		return false;
@@ -264,7 +265,7 @@ bool ZipReader::ExtractEntryToFile(const std::string &archiveRelativePath, const
 
 	std::FILE *destination = OpenNative(destinationPath, L"wb", "wb");
 	if (!destination) {
-		errorMessage = "failed to open destination file for writing: " + destinationPath.string();
+		errorMessage = "failed to open destination file for writing: " + PathToUtf8(destinationPath);
 		return false;
 	}
 
