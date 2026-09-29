@@ -8,6 +8,7 @@
 
 #include "ObsConfigPathProvider.h"
 #include "core/RestoreManager.h"
+#include "core/RestoreResult.h"
 #include "core/ActiveSelection.h"
 #include "core/PathUtf8.h"
 #include "core/SceneCollectionSnapshot.h"
@@ -103,47 +104,103 @@ static void MergeRestoredConfigIntoMemory(const std::filesystem::path &obsDataDi
 	}
 }
 
-static void CommitPendingRestoreIfAny()
+// Where things live, worked out once at load: at shutdown the frontend and
+// parts of Qt are already gone, so nothing there may be asked again.
+static std::filesystem::path safetyBackupDir;
+static std::filesystem::path obsDataDir;
+
+static std::filesystem::path PendingMarkerPath()
+{
+	return safetyBackupDir / "pending-restore.marker";
+}
+
+static std::filesystem::path StoredResultPath()
+{
+	return safetyBackupDir / "restore-result.ini";
+}
+
+// Applies a restore staged by BackupDialog, if one is waiting. Returns false when
+// nothing was pending. `marker` is filled in either way it ran.
+static bool CommitPendingRestore(obs_backuper::PendingRestoreMarker &marker, obs_backuper::CommitOutcome &commit)
 {
 	// A crash or kill mid-restore can leave a decrypted temporary archive
 	// behind; never let plaintext outlive the operation that made it.
-	obs_backuper::RestoreManager::RemoveStaleTemporaryFiles(obs_backuper::GetSafetyBackupDir());
+	obs_backuper::RestoreManager::RemoveStaleTemporaryFiles(safetyBackupDir);
 	// Files a previous restore had to rename aside while replacing plugins that
 	// were loaded at the time.
-	obs_backuper::RestoreManager::RemovePluginReplacementLeftovers(obs_backuper::GetObsDataDir());
+	obs_backuper::RestoreManager::RemovePluginReplacementLeftovers(obsDataDir);
 
-	const auto markerPath = obs_backuper::GetSafetyBackupDir() / "pending-restore.marker";
-
-	obs_backuper::PendingRestoreMarker marker;
 	std::string readError;
-	if (!obs_backuper::RestoreManager::ReadPendingRestoreMarker(markerPath, marker, readError))
-		return; // nothing pending -- the common case
+	if (!obs_backuper::RestoreManager::ReadPendingRestoreMarker(PendingMarkerPath(), marker, readError))
+		return false; // nothing pending -- the common case
 
 	obs_log(LOG_INFO, "found a pending restore (staged in \"%s\"), applying it to \"%s\"",
 		obs_backuper::PathToUtf8(marker.stagingDir).c_str(), obs_backuper::PathToUtf8(marker.targetDir).c_str());
 
-	const auto commit = obs_backuper::RestoreManager::CommitStagedRestore(
-		marker.stagingDir, marker.targetDir, marker.safetyBackupPath, marker.fileWriteMaxAttempts,
-		marker.fileWriteRetryDelayMs);
+	commit = obs_backuper::RestoreManager::CommitStagedRestore(marker.stagingDir, marker.targetDir,
+								     marker.safetyBackupPath, marker.fileWriteMaxAttempts,
+								     marker.fileWriteRetryDelayMs);
+	obs_backuper::RestoreManager::RemovePendingRestoreMarker(PendingMarkerPath());
 
-	obs_backuper::RestoreManager::RemovePendingRestoreMarker(markerPath);
+	if (commit.success)
+		obs_log(LOG_INFO, "pending restore applied successfully");
+	else if (commit.rolledBack)
+		obs_log(LOG_ERROR, "pending restore failed and was rolled back: %s", commit.errorMessage.c_str());
+	else
+		obs_log(LOG_ERROR, "pending restore failed: %s", commit.errorMessage.c_str());
+	return true;
+}
 
+static void SetPendingRestoreResult(bool success, bool rolledBack, obs_backuper::ErrorKind kind,
+				    const std::string &message)
+{
 	pendingRestoreHasResult = true;
-	pendingRestoreSuccess = commit.success;
-	pendingRestoreRolledBack = commit.rolledBack;
-	pendingRestoreErrorMessage = commit.errorMessage;
-	pendingRestoreErrorKind = commit.errorKind;
+	pendingRestoreSuccess = success;
+	pendingRestoreRolledBack = rolledBack;
+	pendingRestoreErrorKind = kind;
+	pendingRestoreErrorMessage = message;
+}
 
+// The normal way a restore is applied: while OBS shuts down, after it has saved
+// everything it is going to save. Applied any earlier, OBS would keep working
+// from what it had already read (its profile and scene collection lists, its
+// settings) and write that back over the restored files on exit. The next start
+// then simply reads the restored files like any other start. The outcome goes
+// to a file, since there is no window left to show it in.
+static void ApplyPendingRestoreAtShutdown()
+{
+	obs_backuper::PendingRestoreMarker marker;
+	obs_backuper::CommitOutcome commit;
+	if (!CommitPendingRestore(marker, commit))
+		return;
+
+	obs_backuper::WriteRestoreResult(StoredResultPath(),
+					  {commit.success, commit.rolledBack, commit.errorKind, commit.errorMessage});
+}
+
+// A restore that was still waiting when OBS started: OBS was killed instead of
+// shutting down, or a previous version left one. Apply it now and switch to what
+// it restored as far as OBS's already-built lists allow; the rest is right from
+// the next start on.
+static void CommitPendingRestoreIfAny()
+{
+	obs_backuper::StoredRestoreResult stored;
+	if (obs_backuper::ReadRestoreResult(StoredResultPath(), stored)) {
+		obs_backuper::RemoveRestoreResult(StoredResultPath());
+		SetPendingRestoreResult(stored.success, stored.rolledBack, stored.errorKind, stored.errorMessage);
+	}
+
+	obs_backuper::PendingRestoreMarker marker;
+	obs_backuper::CommitOutcome commit;
+	if (!CommitPendingRestore(marker, commit))
+		return;
+
+	SetPendingRestoreResult(commit.success, commit.rolledBack, commit.errorKind, commit.errorMessage);
 	if (commit.success) {
 		pendingRestoreSelection = obs_backuper::ReadActiveSelection(marker.targetDir);
 		pendingRestoreScenes = obs_backuper::SnapshotSceneCollections(marker.targetDir);
 		pendingRestoreDataDir = marker.targetDir;
 		MergeRestoredConfigIntoMemory(marker.targetDir);
-		obs_log(LOG_INFO, "pending restore applied successfully");
-	} else if (commit.rolledBack) {
-		obs_log(LOG_ERROR, "pending restore failed and was rolled back: %s", commit.errorMessage.c_str());
-	} else {
-		obs_log(LOG_ERROR, "pending restore failed: %s", commit.errorMessage.c_str());
 	}
 }
 
@@ -243,6 +300,8 @@ static void onFrontendEvent(enum obs_frontend_event event, void *)
 
 bool obs_module_load(void)
 {
+	safetyBackupDir = obs_backuper::GetSafetyBackupDir();
+	obsDataDir = obs_backuper::GetObsDataDir();
 	CommitPendingRestoreIfAny();
 
 	obs_frontend_add_event_callback(onFrontendEvent, nullptr);
@@ -262,6 +321,8 @@ void obs_module_unload(void)
 
 	if (backupDialog)
 		delete backupDialog;
+
+	ApplyPendingRestoreAtShutdown();
 
 	obs_log(LOG_INFO, "plugin unloaded");
 }

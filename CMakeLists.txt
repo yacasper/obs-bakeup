@@ -80,6 +80,8 @@ target_compile_options(monocypher PRIVATE
 add_library(obs-backuper-core STATIC
   src/core/ActiveSelection.cpp
   src/core/ActiveSelection.h
+  src/core/RestoreResult.cpp
+  src/core/RestoreResult.h
   src/core/SceneCollectionSnapshot.cpp
   src/core/SceneCollectionSnapshot.h
   src/core/ConfigPaths.cpp

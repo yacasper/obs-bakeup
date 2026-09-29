@@ -34,12 +34,12 @@ Every archive carries a `manifest.json` (plugin, OBS and OS versions, creation t
 
 ## 🔄 How restoring works
 
-OBS writes its own in-memory copy of your scene collections back to disk when it exits, which would silently undo a restore made while OBS is running. To avoid that, the plugin:
+OBS reads its profiles, scene collections and settings into memory when it starts and writes that copy back to disk when it exits, which would silently undo a restore made while OBS is running. To avoid that, the plugin:
 
 1. validates the backup (and asks for the password if it is encrypted);
 2. saves your current settings as a safety backup (the 5 most recent are kept in an `obs-backuper-safety` folder next to your OBS configuration);
 3. extracts the backup to a staging folder;
-4. offers to restart OBS, and applies the restore on the next launch, **before** OBS loads any scene collection.
+4. offers to restart OBS, and applies the restore **as OBS shuts down**, after OBS has written everything it is going to write. The next start then reads the restored files like any other start, with the right profile, scene collection, canvas size, docks and plugins already in place.
 
 > ⚠️ **On Windows, plugins live in system folders** (`%ProgramData%\obs-studio\plugins` and OBS's program folder, usually under `C:\Program Files`), which may need administrator rights to write to. A backup made with a normal OBS also restores into a portable one and the other way round. If Windows refuses some plugin files, the restore still finishes — settings and every other plugin are restored — and you are told how many plugin files could not be installed; run OBS as administrator and restore again to install them.
 
