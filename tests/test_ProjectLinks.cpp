@@ -41,7 +41,8 @@ TEST_CASE("The links shown in the dialog are the intended ones", "[ProjectLinks]
 
 TEST_CASE("Every link is https and free of characters that would break an HTML attribute", "[ProjectLinks]")
 {
-	for (const std::string url : {std::string(kAuthorUrl), std::string(kSupportUrl), std::string(kProjectUrl)}) {
+	const std::string urls[] = {kAuthorUrl, kSupportUrl, kProjectUrl};
+	for (const std::string &url : urls) {
 		INFO(url);
 		CHECK(StartsWith(url, "https://"));
 		CHECK(url.find('"') == std::string::npos);
