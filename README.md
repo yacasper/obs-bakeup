@@ -64,6 +64,10 @@ When you first open the plugin's dialog in an OBS session, it makes **one** anon
 
 Version 0.1.1. Backup and restore are checked end to end on **Windows** (normal and portable OBS 32.2, repeated restores included) and on **macOS** (OBS 32.2, password-protected backup restored twice). macOS packages are not signed yet, so macOS may ask you to right-click the installer and choose **Open**.
 
+## 💜 Support the project
+
+OBS Bakeup is free and open source. If it saved you a stream setup and you would like to say thanks, you can support the project here: <https://destream.net/live/Chillcody>
+
 ## 📜 License
 
 GPL-2.0-or-later — see [LICENSE](LICENSE). Required because the plugin links against `libobs`, which is GPL-2.0-or-later. Third-party components are listed in [NOTICE](NOTICE):
