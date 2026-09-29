@@ -1,0 +1,21 @@
+OBS Bakeup
+Copyright (C) 2026 Acid Crusher <chillcody9@gmail.com>
+
+Original project: https://github.com/yacasper/obs-bakeup
+Made by Chill Pixel Bakery: https://www.youtube.com/@ChillPixelBakery
+
+This program is free software licensed under the GNU General Public License,
+version 2 or (at your option) any later version. See the LICENSE file.
+
+If you redistribute this program or a modified version of it, the GPL requires
+you to keep this copyright notice and the notices in the source files intact,
+to mark your changes as such, and to make the corresponding source code
+available under the same license.
+
+Third-party components (fetched at build time, each under its own license):
+  - miniz         (MIT)                 https://github.com/richgel999/miniz
+  - Monocypher    (BSD-2-Clause / CC0)  https://github.com/LoupVaillant/Monocypher
+  - Catch2        (BSL-1.0), tests only https://github.com/catchorg/Catch2
+
+The names "OBS Bakeup" and "Chill Pixel Bakery", and the associated logo and
+branding, are not covered by the GPL. See "Name and attribution" in README.md.
