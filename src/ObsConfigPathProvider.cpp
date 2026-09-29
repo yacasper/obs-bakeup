@@ -33,9 +33,19 @@ std::filesystem::path GetObsDataDir()
 
 	const auto executableDir =
 		std::filesystem::path(QCoreApplication::applicationDirPath().toStdString());
-	const bool portableMarkerExists = std::filesystem::exists(executableDir / "portable_mode.txt");
 
-	return ResolveObsDataDir(kCurrentPlatform, obsConfigPath, executableDir, portableMarkerExists);
+	// Portable mode exists on Windows only (official macOS builds don't enable
+	// it), and os_get_config_path() knows nothing about it, so replicate OBS's
+	// own check.
+	bool portableFlagGiven = false;
+	for (const QString &argument : QCoreApplication::arguments()) {
+		if (argument == "--portable" || argument == "-p")
+			portableFlagGiven = true;
+	}
+	const bool portableMode =
+		kCurrentPlatform == Platform::Windows && IsPortableMode(kCurrentPlatform, executableDir, portableFlagGiven);
+
+	return ResolveObsDataDir(kCurrentPlatform, obsConfigPath, executableDir, portableMode);
 }
 
 std::filesystem::path GetSafetyBackupDir()

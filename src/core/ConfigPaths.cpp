@@ -31,11 +31,39 @@ std::filesystem::path FallbackDataDir(Platform platform)
 
 } // namespace
 
-std::filesystem::path ResolveObsDataDir(Platform platform, const std::optional<std::filesystem::path> &obsConfigPath,
-					 const std::filesystem::path &executableDir, bool portableMarkerExists)
+std::filesystem::path ObsBasePathFromExecutableDir(Platform platform, const std::filesystem::path &executableDir)
 {
-	if (portableMarkerExists && !executableDir.empty())
-		return executableDir / "config" / "obs-studio";
+	if (executableDir.empty())
+		return {};
+
+	auto base = (platform == Platform::Windows ? executableDir / ".." / ".." : executableDir / "..").lexically_normal();
+	if (!base.has_filename())
+		base = base.parent_path(); // "C:/obs/" -> "C:/obs"
+	return base;
+}
+
+bool IsPortableMode(Platform platform, const std::filesystem::path &executableDir, bool portableFlagGiven)
+{
+	if (portableFlagGiven)
+		return true;
+
+	const auto base = ObsBasePathFromExecutableDir(platform, executableDir);
+	if (base.empty())
+		return false;
+
+	for (const char *marker : {"portable_mode", "obs_portable_mode", "portable_mode.txt", "obs_portable_mode.txt"}) {
+		std::error_code ec;
+		if (std::filesystem::exists(base / marker, ec) && !ec)
+			return true;
+	}
+	return false;
+}
+
+std::filesystem::path ResolveObsDataDir(Platform platform, const std::optional<std::filesystem::path> &obsConfigPath,
+					 const std::filesystem::path &executableDir, bool portableMode)
+{
+	if (portableMode && !executableDir.empty())
+		return ObsBasePathFromExecutableDir(platform, executableDir) / "config" / "obs-studio";
 
 	if (obsConfigPath && !obsConfigPath->empty())
 		return *obsConfigPath;
