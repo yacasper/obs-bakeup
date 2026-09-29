@@ -996,6 +996,39 @@ RestoreOptions MakeRootedOptions(const std::filesystem::path &archive, const Tem
 
 } // namespace
 
+TEST_CASE("A backup from a normal OBS restores its plugins into a portable install's folder",
+	  "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(fixture, {{"system-plugins/foo/foo.dll", "FOO-NEW"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto portablePlugins = fixture.root / "portable" / "plugins";
+
+	auto options = MakeRestoreOptions(archive, targetDir, fixture.root / "safety");
+	options.pluginRoots = {{kPortablePluginsPrefix, portablePlugins}};
+	const auto staged = RestoreManager::PerformStagedRestore(options, fixture.root / "staging");
+
+	REQUIRE(staged.success);
+	CHECK(staged.pluginFilesFailed == 0);
+	CHECK(ReadFile(portablePlugins / "foo" / "foo.dll") == "FOO-NEW");
+	CHECK_FALSE(std::filesystem::exists(targetDir / "system-plugins"));
+}
+
+TEST_CASE("A backup from a portable OBS restores its plugins into a normal install's folder",
+	  "[RestoreManager][pluginroot]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildMixedArchive(fixture, {{"portable-plugins/foo/foo.dll", "FOO-NEW"}});
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto systemPlugins = fixture.root / "ProgramData" / "obs-studio" / "plugins";
+
+	const auto staged = RestoreManager::PerformStagedRestore(
+		MakeRootedOptions(archive, fixture, targetDir, systemPlugins), fixture.root / "staging");
+
+	REQUIRE(staged.success);
+	CHECK(ReadFile(systemPlugins / "foo" / "foo.dll") == "FOO-NEW");
+}
+
 TEST_CASE("A staged restore puts plugin-folder files into their folder, not under targetDir",
 	  "[RestoreManager][pluginroot]")
 {

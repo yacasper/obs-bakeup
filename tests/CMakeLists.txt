@@ -35,6 +35,7 @@ add_executable(obs-backuper-core-tests
   test_EncryptedContainer.cpp
   test_EncryptedBackupFlow.cpp
   test_PathUtf8.cpp
+  test_ActiveSelection.cpp
 )
 
 target_link_libraries(obs-backuper-core-tests PRIVATE obs-backuper-core Catch2::Catch2WithMain)

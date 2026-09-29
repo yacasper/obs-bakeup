@@ -7,6 +7,7 @@
 
 #include "ObsConfigPathProvider.h"
 #include "core/RestoreManager.h"
+#include "core/ActiveSelection.h"
 #include "core/PathUtf8.h"
 #include "plugin-support.h"
 #include "ui/BackupDialog.h"
@@ -44,6 +45,8 @@ static bool pendingRestoreSuccess = false;
 static bool pendingRestoreRolledBack = false;
 static std::string pendingRestoreErrorMessage;
 static obs_backuper::ErrorKind pendingRestoreErrorKind = obs_backuper::ErrorKind::None;
+// The profile / scene collection the restored config names (empty: none).
+static obs_backuper::ActiveSelection pendingRestoreSelection;
 
 static void openBackupDialog()
 {
@@ -95,11 +98,61 @@ static void CommitPendingRestoreIfAny()
 	pendingRestoreErrorKind = commit.errorKind;
 
 	if (commit.success) {
+		pendingRestoreSelection = obs_backuper::ReadActiveSelection(marker.targetDir);
 		obs_log(LOG_INFO, "pending restore applied successfully");
 	} else if (commit.rolledBack) {
 		obs_log(LOG_ERROR, "pending restore failed and was rolled back: %s", commit.errorMessage.c_str());
 	} else {
 		obs_log(LOG_ERROR, "pending restore failed: %s", commit.errorMessage.c_str());
+	}
+}
+
+// True if `name` is one of the NULL-terminated names in `list`.
+static bool ContainsName(char **list, const std::string &name)
+{
+	if (list == nullptr)
+		return false;
+	for (char **it = list; *it != nullptr; ++it) {
+		if (name == *it)
+			return true;
+	}
+	return false;
+}
+
+// OBS chooses its profile before any plugin loads, so a restore applied from
+// obs_module_load() comes too late for it: OBS would keep running on whatever
+// profile it started with (canvas size, stream keys and hotkeys all live in
+// the profile). Switch to what the restored config says.
+static void SwitchToRestoredSelection()
+{
+	const std::string profile = pendingRestoreSelection.profile;
+	const std::string collection = pendingRestoreSelection.sceneCollection;
+	pendingRestoreSelection = {};
+
+	if (!profile.empty()) {
+		char *current = obs_frontend_get_current_profile();
+		const bool differs = current == nullptr || profile != current;
+		bfree(current);
+		char **profiles = obs_frontend_get_profiles();
+		const bool exists = ContainsName(profiles, profile);
+		bfree(profiles);
+		if (differs && exists) {
+			obs_log(LOG_INFO, "switching to the restored profile \"%s\"", profile.c_str());
+			obs_frontend_set_current_profile(profile.c_str());
+		}
+	}
+
+	if (!collection.empty()) {
+		char *current = obs_frontend_get_current_scene_collection();
+		const bool differs = current == nullptr || collection != current;
+		bfree(current);
+		char **collections = obs_frontend_get_scene_collections();
+		const bool exists = ContainsName(collections, collection);
+		bfree(collections);
+		if (differs && exists) {
+			obs_log(LOG_INFO, "switching to the restored scene collection \"%s\"", collection.c_str());
+			obs_frontend_set_current_scene_collection(collection.c_str());
+		}
 	}
 }
 
@@ -109,6 +162,8 @@ static void onFrontendEvent(enum obs_frontend_event event, void *)
 		return;
 
 	pendingRestoreHasResult = false;
+	if (pendingRestoreSuccess)
+		SwitchToRestoredSelection();
 
 	auto *mainWindow = static_cast<QWidget *>(obs_frontend_get_main_window());
 	if (pendingRestoreSuccess) {

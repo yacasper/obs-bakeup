@@ -78,6 +78,8 @@ target_compile_options(monocypher PRIVATE
 # OBS-coupled CollectFiles()/GetObsDataDir() glue lives in
 # src/ObsConfigPathProvider.* and is only linked into the plugin module below.
 add_library(obs-backuper-core STATIC
+  src/core/ActiveSelection.cpp
+  src/core/ActiveSelection.h
   src/core/ConfigPaths.cpp
   src/core/ConfigPaths.h
   src/core/Crypto.cpp

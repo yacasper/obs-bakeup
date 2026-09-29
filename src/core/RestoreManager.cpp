@@ -106,13 +106,21 @@ bool IsOwnPluginInRoot(const std::filesystem::path &pathInsideRoot)
 	return IsOwnPluginName(NthComponent(pathInsideRoot, 0));
 }
 
-// The PluginRoot an archive path belongs to (by prefix), or null if this
-// machine has no such folder.
+bool IsUserPluginsPrefix(const std::string &foldedPrefix)
+{
+	return foldedPrefix == kSystemPluginsPrefix || foldedPrefix == kPortablePluginsPrefix;
+}
+
+// The PluginRoot an archive path belongs to, or null if this machine has no
+// such folder. The system and the portable plugin folders are the same thing
+// in two OBS modes (an OBS install has exactly one of them), so a backup taken
+// in one mode restores its plugins into the other mode's folder.
 const PluginRoot *FindPluginRoot(const std::vector<PluginRoot> &roots, const std::filesystem::path &archiveRelativePath)
 {
 	const std::string prefix = NthComponent(archiveRelativePath, 0);
 	for (const auto &root : roots) {
-		if (AsciiFold(root.archivePrefix) == prefix)
+		const std::string rootPrefix = AsciiFold(root.archivePrefix);
+		if (rootPrefix == prefix || (IsUserPluginsPrefix(rootPrefix) && IsUserPluginsPrefix(prefix)))
 			return &root;
 	}
 	return nullptr;
