@@ -41,6 +41,8 @@ add_executable(obs-backuper-core-tests
   test_RestoreResult.cpp
   test_RestoreFlow.cpp
   test_Crypto.cpp
+  test_WindowsLayout.cpp
+  test_WindowsScenario.cpp
 )
 
 target_link_libraries(obs-backuper-core-tests PRIVATE obs-backuper-core Catch2::Catch2WithMain)

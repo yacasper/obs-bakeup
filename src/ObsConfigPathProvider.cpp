@@ -67,23 +67,13 @@ std::vector<PluginRoot> GetExtraPluginRoots()
 	std::vector<PluginRoot> roots;
 
 #if defined(_WIN32)
-	if (RunningPortable()) {
-		const auto base = ObsBasePathFromExecutableDir(kCurrentPlatform, ExecutableDir());
-		if (!base.empty())
-			roots.push_back({kPortablePluginsPrefix, base / "plugins"});
-	} else {
-		char buffer[4096] = {};
-		if (os_get_program_data_path(buffer, sizeof(buffer), "obs-studio/plugins") > 0 && buffer[0] != '\0')
-			roots.push_back({kSystemPluginsPrefix, PathFromUtf8(buffer)});
-	}
+	std::optional<std::filesystem::path> programDataPlugins;
+	char buffer[4096] = {};
+	if (os_get_program_data_path(buffer, sizeof(buffer), "obs-studio/plugins") > 0 && buffer[0] != '\0')
+		programDataPlugins = PathFromUtf8(buffer);
 
-	// Plugins installed the classic way into OBS's own program folder (in both
-	// modes), minus everything OBS itself put there.
-	const auto base = ObsBasePathFromExecutableDir(kCurrentPlatform, ExecutableDir());
-	if (!base.empty()) {
-		roots.push_back({kProgramPluginsBinPrefix, base / "obs-plugins" / "64bit", ObsShippedPluginStems()});
-		roots.push_back({kProgramPluginsDataPrefix, base / "data" / "obs-plugins", ObsShippedPluginStems()});
-	}
+	roots = ResolveWindowsPluginRoots(ObsBasePathFromExecutableDir(kCurrentPlatform, ExecutableDir()),
+					  RunningPortable(), programDataPlugins);
 #endif
 
 	return roots;

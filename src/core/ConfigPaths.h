@@ -4,8 +4,11 @@
 
 #pragma once
 
+#include "FileCollector.h"
+
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 namespace obs_backuper {
 
@@ -38,5 +41,16 @@ bool IsPortableMode(Platform platform, const std::filesystem::path &executableDi
 // (%APPDATA%\obs-studio or ~/Library/Application Support/obs-studio).
 std::filesystem::path ResolveObsDataDir(Platform platform, const std::optional<std::filesystem::path> &obsConfigPath,
 					 const std::filesystem::path &executableDir, bool portableMode);
+
+// The folders outside the obs-studio settings folder that hold installed
+// plugins on Windows (see PluginRoot), in the order they are backed up:
+//  - the per-user plugin folder: <obsBaseDir>\plugins in portable mode,
+//    otherwise %ProgramData%\obs-studio\plugins (programDataPluginsDir; nothing
+//    if Windows could not say where it is);
+//  - the classic install folders under obsBaseDir, without what OBS ships itself:
+//    obs-plugins\64bit and data\obs-plugins.
+// An empty obsBaseDir gives no portable and no program-folder roots.
+std::vector<PluginRoot> ResolveWindowsPluginRoots(const std::filesystem::path &obsBaseDir, bool portableMode,
+						   const std::optional<std::filesystem::path> &programDataPluginsDir);
 
 } // namespace obs_backuper

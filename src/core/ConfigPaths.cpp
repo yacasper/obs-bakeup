@@ -71,4 +71,23 @@ std::filesystem::path ResolveObsDataDir(Platform platform, const std::optional<s
 	return FallbackDataDir(platform);
 }
 
+std::vector<PluginRoot> ResolveWindowsPluginRoots(const std::filesystem::path &obsBaseDir, bool portableMode,
+						   const std::optional<std::filesystem::path> &programDataPluginsDir)
+{
+	std::vector<PluginRoot> roots;
+
+	if (portableMode) {
+		if (!obsBaseDir.empty())
+			roots.push_back({kPortablePluginsPrefix, obsBaseDir / "plugins", {}});
+	} else if (programDataPluginsDir && !programDataPluginsDir->empty()) {
+		roots.push_back({kSystemPluginsPrefix, *programDataPluginsDir, {}});
+	}
+
+	if (!obsBaseDir.empty()) {
+		roots.push_back({kProgramPluginsBinPrefix, obsBaseDir / "obs-plugins" / "64bit", ObsShippedPluginStems()});
+		roots.push_back({kProgramPluginsDataPrefix, obsBaseDir / "data" / "obs-plugins", ObsShippedPluginStems()});
+	}
+	return roots;
+}
+
 } // namespace obs_backuper
