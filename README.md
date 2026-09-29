@@ -41,7 +41,7 @@ OBS writes its own in-memory copy of your scene collections back to disk when it
 3. extracts the backup to a staging folder;
 4. offers to restart OBS, and applies the restore on the next launch, **before** OBS loads any scene collection.
 
-Plugins get extra care because OBS may already be running their code: a plugin file is never overwritten in place (it is left alone when identical, otherwise replaced by writing a new file and swapping it in), and this plugin's own files are never touched by a restore. Restored plugins are loaded on the launch after that one, because OBS lists its plugins before this plugin can apply the restore — you are told to restart OBS once more when plugins were restored. Executable files keep their execute permission.
+Plugins get extra care because OBS may already be running their code. They are put in place right away, while OBS is still open, so a single restart is enough for OBS to find them. A plugin file is never overwritten in place (it is left alone when identical, otherwise replaced by writing a new file and swapping it in), and this plugin's own files are never touched by a restore. Executable files keep their execute permission.
 
 You are told how the restore turned out once OBS is back up.
 

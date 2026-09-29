@@ -143,10 +143,8 @@ void CopyPermissions(const std::filesystem::path &source, const std::filesystem:
 //    new one takes its place. The "*.bakeup-old" file is removed on a later
 //    start (RemovePluginReplacementLeftovers).
 bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesystem::path &destination,
-		       std::string &errorMessage, bool &contentChanged)
+		       std::string &errorMessage)
 {
-	contentChanged = false;
-
 	std::error_code ec;
 	if (std::filesystem::exists(destination, ec) && FilesAreIdentical(source, destination)) {
 		CopyPermissions(source, destination);
@@ -163,10 +161,8 @@ bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesyste
 	CopyPermissions(source, fresh);
 
 	std::filesystem::rename(fresh, destination, ec);
-	if (!ec) {
-		contentChanged = true;
+	if (!ec)
 		return true;
-	}
 
 	const auto old = WithSuffix(destination, kReplacementOldSuffix);
 	std::error_code asideEc;
@@ -186,7 +182,6 @@ bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesyste
 		std::filesystem::remove(fresh, asideEc);
 		return false;
 	}
-	contentChanged = true;
 	return true;
 }
 
@@ -196,9 +191,8 @@ bool ReplaceFileSafely(const std::filesystem::path &source, const std::filesyste
 // plugin's own files are skipped.
 bool CopyWithRetries(const std::filesystem::path &sourceFile, const std::filesystem::path &destDir,
 		      const std::filesystem::path &relativePath, int maxAttempts, int retryDelayMs,
-		      std::string &errorMessage, bool &pluginFileChanged)
+		      std::string &errorMessage)
 {
-	pluginFileChanged = false;
 	if (IsOwnPluginPath(relativePath))
 		return true;
 
@@ -209,7 +203,7 @@ bool CopyWithRetries(const std::filesystem::path &sourceFile, const std::filesys
 	const bool isPlugin = IsPluginPath(relativePath);
 	for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
 		if (isPlugin) {
-			if (ReplaceFileSafely(sourceFile, destination, errorMessage, pluginFileChanged))
+			if (ReplaceFileSafely(sourceFile, destination, errorMessage))
 				return true;
 		} else {
 			std::error_code copyEc;
@@ -347,9 +341,8 @@ void RollbackFromSafetyBackup(const std::filesystem::path &safetyBackupPath, con
 		if (IsPluginPath(entry.relativePath)) {
 			// Never overwrite a possibly loaded plugin in place.
 			const auto temp = WithSuffix(destination, kRollbackTempSuffix);
-			bool changed = false;
 			if (reader.ExtractEntryToFile(entry.relativePath.generic_u8string(), temp, extractError))
-				ReplaceFileSafely(temp, destination, extractError, changed);
+				ReplaceFileSafely(temp, destination, extractError);
 			std::error_code removeEc;
 			std::filesystem::remove(temp, removeEc);
 			continue;
@@ -694,6 +687,14 @@ StagedRestoreOutcome RestoreManager::PerformStagedRestore(const RestoreOptions &
 			entries.push_back(std::move(entry));
 	}
 
+	// Plugin files are put in place right here, not at the next start: OBS
+	// lists the plugins to load before this plugin runs at startup, so files
+	// restored later would only be loaded on the launch after that, i.e. the
+	// user would have to restart OBS twice. ReplaceFileSafely never modifies a
+	// file OBS may have loaded, so doing it while OBS runs is safe. Settings
+	// still wait for the restart (see PerformStagedRestore's doc comment).
+	std::vector<std::filesystem::path> appliedPluginPaths;
+
 	const std::size_t total = entries.size();
 	for (std::size_t i = 0; i < total; ++i) {
 		const auto &entry = entries[i];
@@ -701,11 +702,37 @@ StagedRestoreOutcome RestoreManager::PerformStagedRestore(const RestoreOptions &
 		if (onProgress)
 			onProgress(i + 1, total, entry.relativePath);
 
+		if (IsOwnPluginPath(entry.relativePath))
+			continue; // the running copy of this plugin is never replaced
+
 		std::string extractError;
-		if (!ExtractWithRetries(reader, entry, stagingDir, options.fileWriteMaxAttempts,
-					 options.fileWriteRetryDelayMs, extractError)) {
-			// Nothing under targetDir was touched -- no rollback needed, just
-			// clean up the half-written staging directory.
+		bool ok = ExtractWithRetries(reader, entry, stagingDir, options.fileWriteMaxAttempts,
+					      options.fileWriteRetryDelayMs, extractError);
+		if (ok && IsPluginPath(entry.relativePath)) {
+			const auto staged = stagingDir / entry.relativePath;
+			const auto destination = options.targetDir / entry.relativePath;
+			std::error_code dirEc2;
+			std::filesystem::create_directories(destination.parent_path(), dirEc2);
+			for (int attempt = 1; attempt <= options.fileWriteMaxAttempts; ++attempt) {
+				ok = ReplaceFileSafely(staged, destination, extractError);
+				if (ok || attempt == options.fileWriteMaxAttempts)
+					break;
+				std::this_thread::sleep_for(std::chrono::milliseconds(options.fileWriteRetryDelayMs));
+			}
+			if (ok)
+				appliedPluginPaths.push_back(entry.relativePath);
+			std::error_code removeEc;
+			std::filesystem::remove(staged, removeEc); // already in place, nothing to commit later
+		}
+
+		if (!ok) {
+			// Settings were not touched. Plugin files that were already put in
+			// place are put back from the safety backup, so the outcome is
+			// all-or-nothing.
+			if (!appliedPluginPaths.empty()) {
+				RollbackFromSafetyBackup(outcome.safetyBackupPath, options.targetDir, appliedPluginPaths);
+				outcome.rolledBack = true;
+			}
 			std::error_code cleanupEc;
 			std::filesystem::remove_all(stagingDir, cleanupEc);
 			outcome.errorMessage =
@@ -737,12 +764,8 @@ CommitOutcome RestoreManager::CommitStagedRestore(const std::filesystem::path &s
 			onProgress(i + 1, total, file.relativePath);
 
 		std::string copyError;
-		bool pluginFileChanged = false;
-		if (CopyWithRetries(file.absolutePath, targetDir, file.relativePath, fileWriteMaxAttempts,
-				     fileWriteRetryDelayMs, copyError, pluginFileChanged)) {
-			if (pluginFileChanged)
-				++outcome.pluginFilesChanged;
-		} else {
+		if (!CopyWithRetries(file.absolutePath, targetDir, file.relativePath, fileWriteMaxAttempts,
+				      fileWriteRetryDelayMs, copyError)) {
 			outcome.errorMessage = "failed to apply staged restore for \"" + file.relativePath.generic_string() +
 						"\": " + copyError;
 			outcome.errorKind = ErrorKind::RestoreApplyFailed;

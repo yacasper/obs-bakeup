@@ -746,43 +746,6 @@ TEST_CASE("Safety backups keep their sortable name and do not carry the OBS vers
 	CHECK(name.find("OBS-") == std::string::npos);
 }
 
-TEST_CASE("CommitStagedRestore counts the plugin files it actually wrote", "[RestoreManager][plugins]")
-{
-	TempDirFixture fixture;
-	const auto stagingDir = fixture.root / "staging";
-	const auto targetDir = fixture.root / "obs-studio";
-
-	WriteFile(stagingDir / "plugins" / "new.plugin" / "lib", "NEW");
-	WriteFile(stagingDir / "plugins" / "changed.plugin" / "lib", "AFTER");
-	WriteFile(stagingDir / "plugins" / "same.plugin" / "lib", "SAME");
-	WriteFile(stagingDir / "plugins" / "obs-backuper.plugin" / "lib", "OWN-OLDER");
-	WriteFile(stagingDir / "global.ini", "size=1\n");
-	WriteFile(targetDir / "plugins" / "changed.plugin" / "lib", "BEFORE");
-	WriteFile(targetDir / "plugins" / "same.plugin" / "lib", "SAME");
-	WriteFile(targetDir / "plugins" / "obs-backuper.plugin" / "lib", "OWN-RUNNING");
-
-	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
-
-	REQUIRE(commit.success);
-	// added + replaced only: not the identical one, not this plugin's own, not a setting.
-	CHECK(commit.pluginFilesChanged == 2);
-}
-
-TEST_CASE("A restore that touches no plugin files reports none", "[RestoreManager][plugins]")
-{
-	TempDirFixture fixture;
-	const auto stagingDir = fixture.root / "staging";
-	const auto targetDir = fixture.root / "obs-studio";
-	WriteFile(stagingDir / "global.ini", "size=1\n");
-	WriteFile(stagingDir / "plugins" / "same.plugin" / "lib", "SAME");
-	WriteFile(targetDir / "plugins" / "same.plugin" / "lib", "SAME");
-
-	const auto commit = RestoreManager::CommitStagedRestore(stagingDir, targetDir, {}, 2, 1);
-
-	REQUIRE(commit.success);
-	CHECK(commit.pluginFilesChanged == 0);
-}
-
 #ifndef _WIN32
 TEST_CASE("A restored plugin keeps its execute permission", "[RestoreManager][plugins]")
 {
@@ -835,7 +798,145 @@ TEST_CASE("A restored plugin keeps its execute permission", "[RestoreManager][pl
 		REQUIRE(commit.success);
 
 		CHECK((std::filesystem::status(restored).permissions() & exec) == exec);
-		CHECK(commit.pluginFilesChanged == 0);
 	}
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Plugins are put in place while OBS is still running (PerformStagedRestore),
+// so one restart is enough for OBS to find them.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A backup archive holding one settings file and the given plugin files.
+std::filesystem::path BuildArchiveWithPlugins(const TempDirFixture &fixture,
+					      const std::vector<std::pair<std::string, std::string>> &pluginFiles)
+{
+	CollectionResult collected;
+	const auto settings = WriteFile(fixture.root / "src" / "global.ini", "size=FROM-BACKUP\n");
+	collected.files.push_back({"global.ini", settings, std::filesystem::file_size(settings)});
+	for (const auto &[relative, content] : pluginFiles) {
+		const auto path = WriteFile(fixture.root / "src" / "plugins" / relative, content);
+		collected.files.push_back({std::filesystem::path("plugins") / relative, path, std::filesystem::file_size(path)});
+	}
+	for (const auto &file : collected.files)
+		collected.totalSizeBytes += file.sizeBytes;
+
+	BackupOptions options;
+	options.destinationDir = fixture.root / "backups";
+	options.pluginVersion = "1.0.0";
+	options.obsVersion = "32.2.2";
+	options.sourceOs = "macos";
+	const auto outcome = BackupManager::CreateBackup(collected, options);
+	REQUIRE(outcome.success);
+	return outcome.archivePath;
+}
+
+} // namespace
+
+TEST_CASE("PerformStagedRestore puts plugins in place right away but leaves settings for the restart",
+	  "[RestoreManager][plugins][staged]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildArchiveWithPlugins(
+		fixture, {{"new.plugin/lib", "NEW-PLUGIN"}, {"changed.plugin/lib", "PLUGIN-AFTER"}});
+
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+	WriteFile(targetDir / "plugins" / "changed.plugin" / "lib", "PLUGIN-BEFORE");
+
+	const auto staging = fixture.root / "staging";
+	const auto options = MakeRestoreOptions(archive, targetDir, fixture.root / "safety");
+	const auto staged = RestoreManager::PerformStagedRestore(options, staging);
+
+	REQUIRE(staged.success);
+	CHECK_FALSE(staged.rolledBack);
+
+	// Plugins are already installed...
+	CHECK(ReadFile(targetDir / "plugins" / "new.plugin" / "lib") == "NEW-PLUGIN");
+	CHECK(ReadFile(targetDir / "plugins" / "changed.plugin" / "lib") == "PLUGIN-AFTER");
+	// ...and are not left in staging to be copied again at the next start.
+	CHECK_FALSE(std::filesystem::exists(staging / "plugins" / "new.plugin" / "lib"));
+
+	// Settings are untouched until the restart applies them.
+	CHECK(ReadFile(targetDir / "global.ini") == "size=CURRENT\n");
+	CHECK(ReadFile(staging / "global.ini") == "size=FROM-BACKUP\n");
+
+	// Applying the staged settings later does not need to touch plugins.
+	const auto commit = RestoreManager::CommitStagedRestore(staging, targetDir, staged.safetyBackupPath, 2, 1);
+	REQUIRE(commit.success);
+	CHECK(ReadFile(targetDir / "global.ini") == "size=FROM-BACKUP\n");
+	CHECK(ReadFile(targetDir / "plugins" / "new.plugin" / "lib") == "NEW-PLUGIN");
+}
+
+TEST_CASE("PerformStagedRestore never replaces this plugin's own files", "[RestoreManager][plugins][staged]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildArchiveWithPlugins(
+		fixture, {{"obs-backuper.plugin/lib", "OLDER-BUILD"}, {"other.plugin/lib", "OTHER"}});
+
+	const auto targetDir = fixture.root / "obs-studio";
+	const auto own = WriteFile(targetDir / "plugins" / "obs-backuper.plugin" / "lib", "RUNNING-BUILD");
+
+	const auto staged = RestoreManager::PerformStagedRestore(
+		MakeRestoreOptions(archive, targetDir, fixture.root / "safety"), fixture.root / "staging");
+
+	REQUIRE(staged.success);
+	CHECK(ReadFile(own) == "RUNNING-BUILD");
+	CHECK(ReadFile(targetDir / "plugins" / "other.plugin" / "lib") == "OTHER");
+	CHECK_FALSE(std::filesystem::exists(fixture.root / "staging" / "plugins" / "obs-backuper.plugin"));
+}
+
+TEST_CASE("PerformStagedRestore on an archive without plugins still touches nothing in targetDir",
+	  "[RestoreManager][plugins][staged]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildArchiveWithPlugins(fixture, {});
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+
+	const auto staged = RestoreManager::PerformStagedRestore(
+		MakeRestoreOptions(archive, targetDir, fixture.root / "safety"), fixture.root / "staging");
+
+	REQUIRE(staged.success);
+	CHECK(ReadFile(targetDir / "global.ini") == "size=CURRENT\n");
+	CHECK_FALSE(std::filesystem::exists(targetDir / "plugins"));
+}
+
+#ifndef _WIN32
+TEST_CASE("PerformStagedRestore rolls plugin files back when a later plugin cannot be placed",
+	  "[RestoreManager][plugins][staged]")
+{
+	TempDirFixture fixture;
+	const auto archive = BuildArchiveWithPlugins(
+		fixture, {{"a.plugin/lib", "A-FROM-BACKUP"}, {"z.plugin/lib", "Z-FROM-BACKUP"}});
+
+	const auto targetDir = fixture.root / "obs-studio";
+	WriteFile(targetDir / "global.ini", "size=CURRENT\n");
+	WriteFile(targetDir / "plugins" / "a.plugin" / "lib", "A-ORIGINAL");
+	// z's folder cannot be written to, so placing its file fails (a is placed
+	// first: entries are processed in archive order).
+	const auto zDir = targetDir / "plugins" / "z.plugin";
+	WriteFile(zDir / "lib", "Z-ORIGINAL");
+	std::filesystem::permissions(zDir, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec,
+				      std::filesystem::perm_options::replace);
+
+	const auto staging = fixture.root / "staging";
+	const auto staged = RestoreManager::PerformStagedRestore(
+		MakeRestoreOptions(archive, targetDir, fixture.root / "safety"), staging);
+
+	std::filesystem::permissions(zDir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+
+	CHECK_FALSE(staged.success);
+	CHECK(staged.rolledBack);
+	CHECK(staged.errorKind == ErrorKind::RestoreExtractFailed);
+	CHECK_FALSE(std::filesystem::exists(staging));
+
+	// Whatever was placed before the failure is back to what it was.
+	CHECK(ReadFile(targetDir / "plugins" / "a.plugin" / "lib") == "A-ORIGINAL");
+	CHECK(ReadFile(targetDir / "global.ini") == "size=CURRENT\n");
+	for (const auto &entry : std::filesystem::recursive_directory_iterator(targetDir / "plugins"))
+		CHECK(entry.path().filename().string().find(".bakeup-") == std::string::npos);
 }
 #endif

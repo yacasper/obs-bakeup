@@ -12,8 +12,9 @@
 // Runs RestoreManager::PerformStagedRestore on a background thread so it
 // doesn't freeze the OBS UI while extracting (mirrors BackupWorker, Stage 3).
 // This only stages the restore into stagingDir and snapshots targetDir for
-// safety -- it does NOT touch targetDir itself. Applying the staged restore
-// onto targetDir happens later, at the next obs_module_load() (restoring
+// safety -- it does NOT touch the settings in targetDir (installed plugins are
+// the exception, see RestoreManager::PerformStagedRestore). Applying the staged
+// settings onto targetDir happens later, at the next obs_module_load() (restoring
 // directly into a live obs-studio directory isn't safe -- see
 // src/core/RestoreManager.h for why, and for the two-step design that works
 // around it).

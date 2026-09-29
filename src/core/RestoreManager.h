@@ -91,6 +91,10 @@ struct StagedRestoreOutcome {
 	ErrorKind errorKind = ErrorKind::None;
 	std::filesystem::path stagingDir;	 // set once staging succeeds -- holds the extracted archive contents
 	std::filesystem::path safetyBackupPath; // set once the safety backup of targetDir succeeds
+
+	// True if a failure after plugin files had already been put in place made
+	// the restore roll targetDir back from the safety backup.
+	bool rolledBack = false;
 };
 
 struct CommitOutcome {
@@ -102,11 +106,6 @@ struct CommitOutcome {
 	// automatically restored from safetyBackupPath.
 	bool rolledBack = false;
 
-	// How many plugin files the restore actually wrote (added or replaced;
-	// files that were already identical don't count). OBS builds its list of
-	// plugins before this plugin gets to apply a restore, so plugins restored
-	// here are only loaded on the launch after this one.
-	int pluginFilesChanged = 0;
 };
 
 // Everything CommitStagedRestore needs, persisted to disk by the UI layer
@@ -170,8 +169,12 @@ public:
 
 	// Stage 1 of the deferred restore: validates the archive, snapshots
 	// targetDir for safety, then extracts the archive into stagingDir instead
-	// of targetDir. Safe to run at any time while OBS is live, since nothing
-	// under targetDir is touched.
+	// of targetDir. Safe to run at any time while OBS is live, since no
+	// setting under targetDir is touched. The one exception is installed
+	// plugins (plugins/...): they are put in place right away, in a way that
+	// never modifies a file OBS may have loaded, so OBS finds them at its next
+	// start and one restart is enough. This plugin's own files are skipped. If
+	// something fails after some plugin files were placed, they are rolled back.
 	static StagedRestoreOutcome PerformStagedRestore(const RestoreOptions &options,
 							  const std::filesystem::path &stagingDir,
 							  const RestoreProgressCallback &onProgress = {});
