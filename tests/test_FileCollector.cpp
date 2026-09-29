@@ -42,6 +42,11 @@ public:
 		WriteFile(root / "plugin_manager" / "state.json", "{}");
 		WriteFile(root / "profiler_data" / "session.bin", "profiler");
 		WriteFile(root / ".DS_Store", "junk");
+		// Finder metadata inside included folders is skipped too.
+		WriteFile(root / "plugins" / ".DS_Store", "junk");
+		WriteFile(root / "plugins" / "some-plugin.plugin" / ".DS_Store", "junk");
+		WriteFile(root / "basic" / "profiles" / ".DS_Store", "junk");
+		WriteFile(root / "plugin_config" / "obs-websocket" / ".DS_Store", "junk");
 	}
 
 	~ObsDirFixture() { std::filesystem::remove_all(root.parent_path()); }
@@ -99,6 +104,20 @@ TEST_CASE("CollectFiles includes only the allow-listed top-level sections", "[Fi
 			result, std::filesystem::path("plugins") / "some-plugin.plugin" / "Contents" / "Info.plist"));
 		CHECK(ContainsRelativePath(result, std::filesystem::path("plugins") / "some-plugin.plugin" / "Contents" /
 							     "MacOS" / "some-plugin"));
+	}
+
+	SECTION(".DS_Store files are never collected, at any depth")
+	{
+		for (const auto &file : result.files)
+			CHECK(file.relativePath.filename() != ".DS_Store");
+		CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("plugins") / ".DS_Store"));
+		CHECK_FALSE(ContainsRelativePath(
+			result, std::filesystem::path("plugins") / "some-plugin.plugin" / ".DS_Store"));
+
+		// ...while their real neighbours still are.
+		CHECK(ContainsRelativePath(
+			result, std::filesystem::path("plugins") / "some-plugin.plugin" / "Contents" / "Info.plist"));
+		CHECK(ContainsRelativePath(result, std::filesystem::path("basic") / "scenes" / "Record.json"));
 	}
 
 	SECTION("diagnostic and internal OBS state are excluded by default")

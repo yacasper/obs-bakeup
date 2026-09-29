@@ -22,6 +22,14 @@ bool IsIncluded(const std::filesystem::path &entryPath, const std::vector<std::s
 	       includedTopLevelEntries.end();
 }
 
+// Finder metadata macOS drops into any folder it has displayed. It carries no
+// OBS data, differs from machine to machine, and would end up in the backup
+// (and be written back by a restore) inside every included folder.
+bool IsJunkFile(const std::filesystem::path &path)
+{
+	return path.filename() == ".DS_Store";
+}
+
 void AddFile(const std::filesystem::path &rootDir, const std::filesystem::path &filePath, std::uintmax_t sizeBytes,
 	     CollectionResult &result)
 {
@@ -35,6 +43,8 @@ void CollectFromEntry(const std::filesystem::path &rootDir, const std::filesyste
 	std::error_code ec;
 
 	if (std::filesystem::is_regular_file(entryPath, ec) && !ec) {
+		if (IsJunkFile(entryPath))
+			return;
 		const auto size = std::filesystem::file_size(entryPath, ec);
 		if (!ec)
 			AddFile(rootDir, entryPath, size, result);
@@ -50,7 +60,7 @@ void CollectFromEntry(const std::filesystem::path &rootDir, const std::filesyste
 
 	for (; !ec && it != end; it.increment(ec)) {
 		std::error_code fileEc;
-		if (!it->is_regular_file(fileEc) || fileEc)
+		if (!it->is_regular_file(fileEc) || fileEc || IsJunkFile(it->path()))
 			continue;
 
 		const auto size = it->file_size(fileEc);

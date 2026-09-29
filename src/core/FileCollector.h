@@ -29,7 +29,8 @@ struct CollectionResult {
 // updates, .sentinel, .DS_Store, etc.) are automatically excluded from the
 // backup without needing to maintain an explicit deny-list that could go
 // stale as OBS is updated. Within the included sections themselves there is
-// no further filtering -- priority is given to maximum recoverability over
+// no further filtering, apart from macOS ".DS_Store" files, which are always
+// skipped -- priority is given to maximum recoverability over
 // archive size (e.g. obs-browser keeps widget logins in its cookies/local
 // storage, so its cache is kept too).
 //
