@@ -26,7 +26,12 @@ std::string ReadRepoFile(const std::string &relativePath)
 	REQUIRE(in.is_open());
 	std::ostringstream buffer;
 	buffer << in.rdbuf();
-	return buffer.str();
+
+	// A Windows checkout may turn line ends into CRLF; the checks below are
+	// about content, so compare with plain LF.
+	std::string text = buffer.str();
+	text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+	return text;
 }
 
 bool Contains(const std::string &text, const std::string &part)
