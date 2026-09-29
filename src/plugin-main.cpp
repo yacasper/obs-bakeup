@@ -7,6 +7,7 @@
 #include <util/config-file.h>
 
 #include "ObsConfigPathProvider.h"
+#include "core/RestoreFlow.h"
 #include "core/RestoreManager.h"
 #include "core/RestoreResult.h"
 #include "core/ActiveSelection.h"
@@ -93,7 +94,7 @@ static void MergeRestoredConfigIntoMemory(const std::filesystem::path &obsDataDi
 			continue;
 		int applied = 0;
 		for (const auto &entry : obs_backuper::ReadIniEntries(obsDataDir, target.file)) {
-			if (entry.section == "General" || entry.section == "Basic")
+			if (!obs_backuper::ShouldMergeIniEntry(entry))
 				continue;
 			config_set_string(target.config, entry.section.c_str(), entry.key.c_str(), entry.value.c_str());
 			++applied;
@@ -109,51 +110,6 @@ static void MergeRestoredConfigIntoMemory(const std::filesystem::path &obsDataDi
 static std::filesystem::path safetyBackupDir;
 static std::filesystem::path obsDataDir;
 
-static std::filesystem::path PendingMarkerPath()
-{
-	return safetyBackupDir / "pending-restore.marker";
-}
-
-static std::filesystem::path StoredResultPath()
-{
-	return safetyBackupDir / "restore-result.ini";
-}
-
-// Applies a restore staged by BackupDialog, if one is waiting. Returns false when
-// nothing was pending. `marker` is filled in either way it ran.
-static bool CommitPendingRestore(obs_backuper::PendingRestoreMarker &marker, obs_backuper::CommitOutcome &commit)
-{
-	// A crash or kill mid-restore can leave a decrypted temporary archive
-	// behind; never let plaintext outlive the operation that made it.
-	obs_backuper::RestoreManager::RemoveStaleTemporaryFiles(safetyBackupDir);
-	// Files a previous restore had to rename aside while replacing plugins that
-	// were loaded at the time.
-	obs_backuper::RestoreManager::RemovePluginReplacementLeftovers(obsDataDir);
-
-	std::string readError;
-	if (!obs_backuper::RestoreManager::ReadPendingRestoreMarker(PendingMarkerPath(), marker, readError))
-		return false; // nothing pending -- the common case
-
-	obs_log(LOG_INFO, "found a pending restore (staged in \"%s\"), applying it to \"%s\"",
-		obs_backuper::PathToUtf8(marker.stagingDir).c_str(), obs_backuper::PathToUtf8(marker.targetDir).c_str());
-
-	commit = obs_backuper::RestoreManager::CommitStagedRestore(marker.stagingDir, marker.targetDir,
-								     marker.safetyBackupPath, marker.fileWriteMaxAttempts,
-								     marker.fileWriteRetryDelayMs);
-	obs_backuper::RestoreManager::RemovePendingRestoreMarker(PendingMarkerPath());
-
-	if (commit.success && commit.filesSkipped > 0)
-		obs_log(LOG_WARNING, "pending restore applied; %d browser file(s) were in use and left as they were, first: %s",
-			commit.filesSkipped, commit.firstSkippedMessage.c_str());
-	else if (commit.success)
-		obs_log(LOG_INFO, "pending restore applied successfully");
-	else if (commit.rolledBack)
-		obs_log(LOG_ERROR, "pending restore failed and was rolled back: %s", commit.errorMessage.c_str());
-	else
-		obs_log(LOG_ERROR, "pending restore failed: %s", commit.errorMessage.c_str());
-	return true;
-}
-
 static void SetPendingRestoreResult(bool success, bool rolledBack, obs_backuper::ErrorKind kind,
 				    const std::string &message)
 {
@@ -164,6 +120,24 @@ static void SetPendingRestoreResult(bool success, bool rolledBack, obs_backuper:
 	pendingRestoreErrorMessage = message;
 }
 
+static void LogAppliedRestore(const obs_backuper::AppliedRestore &applied)
+{
+	const auto &commit = applied.commit;
+	obs_log(LOG_INFO, "applied a pending restore (staged in \"%s\") to \"%s\"",
+		obs_backuper::PathToUtf8(applied.marker.stagingDir).c_str(),
+		obs_backuper::PathToUtf8(applied.marker.targetDir).c_str());
+
+	if (commit.success && commit.filesSkipped > 0)
+		obs_log(LOG_WARNING, "pending restore applied; %d browser file(s) were in use and left as they were, first: %s",
+			commit.filesSkipped, commit.firstSkippedMessage.c_str());
+	else if (commit.success)
+		obs_log(LOG_INFO, "pending restore applied successfully");
+	else if (commit.rolledBack)
+		obs_log(LOG_ERROR, "pending restore failed and was rolled back: %s", commit.errorMessage.c_str());
+	else
+		obs_log(LOG_ERROR, "pending restore failed: %s", commit.errorMessage.c_str());
+}
+
 // The normal way a restore is applied: while OBS shuts down, after it has saved
 // everything it is going to save. Applied any earlier, OBS would keep working
 // from what it had already read (its profile and scene collection lists, its
@@ -172,13 +146,9 @@ static void SetPendingRestoreResult(bool success, bool rolledBack, obs_backuper:
 // to a file, since there is no window left to show it in.
 static void ApplyPendingRestoreAtShutdown()
 {
-	obs_backuper::PendingRestoreMarker marker;
-	obs_backuper::CommitOutcome commit;
-	if (!CommitPendingRestore(marker, commit))
-		return;
-
-	obs_backuper::WriteRestoreResult(StoredResultPath(),
-					  {commit.success, commit.rolledBack, commit.errorKind, commit.errorMessage});
+	const auto applied = obs_backuper::ApplyPendingRestoreAndStoreResult(safetyBackupDir, obsDataDir);
+	if (applied.wasPending)
+		LogAppliedRestore(applied);
 }
 
 // A restore that was still waiting when OBS started: OBS was killed instead of
@@ -188,93 +158,82 @@ static void ApplyPendingRestoreAtShutdown()
 static void CommitPendingRestoreIfAny()
 {
 	obs_backuper::StoredRestoreResult stored;
-	if (obs_backuper::ReadRestoreResult(StoredResultPath(), stored)) {
-		obs_backuper::RemoveRestoreResult(StoredResultPath());
+	if (obs_backuper::TakeStoredRestoreResult(safetyBackupDir, stored))
 		SetPendingRestoreResult(stored.success, stored.rolledBack, stored.errorKind, stored.errorMessage);
-	}
 
-	obs_backuper::PendingRestoreMarker marker;
-	obs_backuper::CommitOutcome commit;
-	if (!CommitPendingRestore(marker, commit))
+	const auto applied = obs_backuper::ApplyPendingRestore(safetyBackupDir, obsDataDir);
+	if (!applied.wasPending)
 		return;
 
-	SetPendingRestoreResult(commit.success, commit.rolledBack, commit.errorKind, commit.errorMessage);
-	if (commit.success) {
-		pendingRestoreSelection = obs_backuper::ReadActiveSelection(marker.targetDir);
-		pendingRestoreScenes = obs_backuper::SnapshotSceneCollections(marker.targetDir);
-		pendingRestoreDataDir = marker.targetDir;
-		MergeRestoredConfigIntoMemory(marker.targetDir);
+	LogAppliedRestore(applied);
+	SetPendingRestoreResult(applied.commit.success, applied.commit.rolledBack, applied.commit.errorKind,
+				applied.commit.errorMessage);
+	if (applied.commit.success) {
+		pendingRestoreSelection = obs_backuper::ReadActiveSelection(applied.marker.targetDir);
+		pendingRestoreScenes = obs_backuper::SnapshotSceneCollections(applied.marker.targetDir);
+		pendingRestoreDataDir = applied.marker.targetDir;
+		MergeRestoredConfigIntoMemory(applied.marker.targetDir);
 	}
 }
 
-// True if `name` is one of the NULL-terminated names in `list`.
-static bool ContainsName(char **list, const std::string &name)
+// The NULL-terminated list OBS returns as a vector. Frees the list.
+static std::vector<std::string> TakeNames(char **list)
 {
-	if (list == nullptr)
-		return false;
-	for (char **it = list; *it != nullptr; ++it) {
-		if (name == *it)
-			return true;
-	}
-	return false;
+	std::vector<std::string> names;
+	for (char **it = list; it != nullptr && *it != nullptr; ++it)
+		names.emplace_back(*it);
+	bfree(list);
+	return names;
 }
 
-// OBS chooses its profile before any plugin loads, so a restore applied from
-// obs_module_load() comes too late for it: OBS would keep running on whatever
-// profile it started with (canvas size, stream keys and hotkeys all live in
-// the profile). Switch to what the restored config says.
+static std::string TakeName(char *name)
+{
+	const std::string copy = name != nullptr ? name : "";
+	bfree(name);
+	return copy;
+}
+
+// OBS chooses its profile before any plugin loads, so a restore applied after
+// that comes too late for it: OBS would keep running on whatever profile it
+// started with (canvas size, stream keys and hotkeys all live in the profile).
+// The decisions are made by obs_backuper::PlanSelectionSwitch.
 static void SwitchToRestoredSelection()
 {
-	const std::string profile = pendingRestoreSelection.profile;
-	const std::string collection = pendingRestoreSelection.sceneCollection;
+	const auto restored = pendingRestoreSelection;
 	pendingRestoreSelection = {};
 	const auto scenes = std::move(pendingRestoreScenes);
 	pendingRestoreScenes.clear();
 
-	if (!profile.empty()) {
-		char *current = obs_frontend_get_current_profile();
-		const bool differs = current == nullptr || profile != current;
-		bfree(current);
-		char **profiles = obs_frontend_get_profiles();
-		const bool exists = ContainsName(profiles, profile);
-		bfree(profiles);
-		if (differs && exists) {
-			obs_log(LOG_INFO, "switching to the restored profile \"%s\"", profile.c_str());
-			obs_frontend_set_current_profile(profile.c_str());
-		}
+	const auto plan = obs_backuper::PlanSelectionSwitch(
+		restored, TakeName(obs_frontend_get_current_profile()), TakeNames(obs_frontend_get_profiles()),
+		TakeName(obs_frontend_get_current_scene_collection()), TakeNames(obs_frontend_get_scene_collections()),
+		!scenes.empty());
+
+	if (plan.switchProfile) {
+		obs_log(LOG_INFO, "switching to the restored profile \"%s\"", plan.profile.c_str());
+		obs_frontend_set_current_profile(plan.profile.c_str());
 	}
 
-	if (!collection.empty()) {
-		char *currentRaw = obs_frontend_get_current_scene_collection();
-		const std::string current = currentRaw != nullptr ? currentRaw : "";
-		bfree(currentRaw);
-		char **collections = obs_frontend_get_scene_collections();
-		const bool exists = ContainsName(collections, collection);
-		std::string other;
-		for (char **it = collections; it != nullptr && *it != nullptr; ++it) {
-			if (collection != *it) {
-				other = *it;
-				break;
-			}
-		}
-		bfree(collections);
-
-		if (exists && current != collection) {
-			obs_log(LOG_INFO, "switching to the restored scene collection \"%s\"", collection.c_str());
-			obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
-			obs_frontend_set_current_scene_collection(collection.c_str());
-		} else if (exists && !other.empty() && !scenes.empty()) {
-			// OBS loaded this collection while still on the wrong profile's canvas,
-			// rescaled it and saved it over the restored file. Step away (that save
-			// happens now), put the files back as the backup had them, and load
-			// the collection again on the right canvas.
-			obs_log(LOG_INFO, "reloading the restored scene collection \"%s\"", collection.c_str());
-			obs_frontend_set_current_scene_collection(other.c_str());
-			obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
-			obs_frontend_set_current_scene_collection(collection.c_str());
-			// Leaving `other` saved it too, possibly rescaled: fix that file as well.
-			obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
-		}
+	switch (plan.collectionAction) {
+	case obs_backuper::CollectionAction::Switch:
+		obs_log(LOG_INFO, "switching to the restored scene collection \"%s\"", plan.collection.c_str());
+		obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
+		obs_frontend_set_current_scene_collection(plan.collection.c_str());
+		break;
+	case obs_backuper::CollectionAction::Reload:
+		// OBS loaded this collection while still on the wrong profile's canvas,
+		// rescaled it and saved it over the restored file. Step away (that save
+		// happens now), put the files back as the backup had them, and load
+		// the collection again on the right canvas.
+		obs_log(LOG_INFO, "reloading the restored scene collection \"%s\"", plan.collection.c_str());
+		obs_frontend_set_current_scene_collection(plan.bounceCollection.c_str());
+		obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
+		obs_frontend_set_current_scene_collection(plan.collection.c_str());
+		// Leaving the bounce collection saved it too, possibly rescaled.
+		obs_backuper::WriteSceneCollections(pendingRestoreDataDir, scenes);
+		break;
+	case obs_backuper::CollectionAction::None:
+		break;
 	}
 }
 

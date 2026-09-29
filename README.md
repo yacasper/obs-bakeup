@@ -7,7 +7,7 @@ Open it from **Tools → OBS Bakeup**.
 ## ✨ Features
 
 - 💾 **Create Backup** — pick a folder, and the plugin archives your whole OBS setup — settings **and installed plugins** — into a single file, with a progress bar and remaining-time estimate. The OBS version is part of the file name, e.g. `obs-backup_2026-09-29_1407_OBS-32.2.2.zip`.
-- 📂 **Restore from Backup** — pick a backup file, review what it contains (creation date, OBS version, source OS) and restore your full configuration from it.
+- 📂 **Restore from Backup** — pick a backup file, review what it contains (creation date, OBS version, source OS) and restore your full configuration from it. After one restart OBS comes up on the restored profile and scene collection, with the same canvas size, custom docks and plugins. A backup made with a normal OBS restores into a portable one and the other way round.
 - 🔒 **Password protection** — optionally encrypt a backup (`.obsbak`, Argon2id + XChaCha20-Poly1305). Stream keys, tokens, file names and the manifest are unreadable without the password, and a strength hint helps you pick a good one. Plain `.zip` backups keep working as before.
   > ⚠️ There is no password recovery. If you forget the password, the backup cannot be restored.
 - 🛟 **Safe restore** — before anything is touched, your current settings are saved automatically. If something fails half-way, the plugin rolls back on its own, including removing files the restore had already added.
@@ -18,8 +18,8 @@ Open it from **Tools → OBS Bakeup**.
 
 | Included ✅ | Not included ❌ |
 | --- | --- |
-| Global and user settings (`global.ini`, `user.ini`) | Logs |
-| Profiles and scene collections (`basic/`) | Crash reports |
+| Global and user settings (`global.ini`, `user.ini`), including custom browser docks and the dock layout | Logs |
+| Profiles and scene collections (`basic/`): canvas size, hotkeys, stream keys and service settings, scenes and sources | Crash reports |
 | Installed plugins: on macOS the `plugins/` folder of your OBS folder; on Windows `%ProgramData%\obs-studio\plugins` (`<OBS folder>\plugins` in portable mode) **and** third-party plugins installed the classic way into OBS's program folder (`obs-plugins` and `data\obs-plugins`, next to `obs64.exe`) | Anything else OBS keeps internally (caches, temp files) |
 | Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins; not the browser's disk caches, which it rebuilds itself) | The plugins and helper files that ship with OBS itself (`obs-ffmpeg`, `win-capture`, `obs-browser` and so on): they belong to one exact OBS version |
 | Themes | Your own files outside the OBS folder: images, videos, audio, fonts, recordings and other media that scenes use |
@@ -34,7 +34,7 @@ Every archive carries a `manifest.json` (plugin, OBS and OS versions, creation t
 
 ## 🔄 How restoring works
 
-OBS reads its profiles, scene collections and settings into memory when it starts and writes that copy back to disk when it exits, which would silently undo a restore made while OBS is running. To avoid that, the plugin:
+OBS reads its profiles, scene collections and settings into memory when it starts and writes that copy back to disk when it exits. A restore made while OBS is running would be silently undone, and one made a moment after start would leave OBS unaware of the restored profiles and collections. To avoid both, the plugin:
 
 1. validates the backup (and asks for the password if it is encrypted);
 2. saves your current settings as a safety backup (the 5 most recent are kept in an `obs-backuper-safety` folder next to your OBS configuration);
@@ -45,14 +45,18 @@ OBS reads its profiles, scene collections and settings into memory when it start
 
 Plugins get extra care because OBS may already be running their code. They are put in place right away, while OBS is still open, so a single restart is enough for OBS to find them. A plugin file is never overwritten in place (it is left alone when identical, otherwise replaced by writing a new file and swapping it in), and this plugin's own files are never touched by a restore. Executable files keep their execute permission.
 
-You are told how the restore turned out once OBS is back up.
+You are told how the restore turned out once OBS is back up: as OBS is shutting down there is no window left to show it in, so the outcome is kept in a small file (`restore-result.ini` in the safety folder) that the next start reads and deletes.
+
+If OBS is killed instead of being closed, the staged restore is still applied on the next start. That start already built its lists of profiles and collections, so the plugin switches to the restored ones where it can, and one more restart makes everything right.
+
+Files the embedded browser (`obs-browser`) keeps open while OBS shuts down cannot be replaced by Windows. Its disk caches are therefore not backed up at all, and a file in its folder that is still locked is left as it was instead of failing the whole restore (the log says so). A locked file anywhere else fails the restore and rolls it back.
 
 ## 📦 Installation
 
 Download the package for your operating system from the [Releases](https://github.com/yacasper/obs-bakeup/releases) page, then restart OBS. Requires **OBS Studio 31 or newer**: the plugin is built against OBS Studio 31 and tested with 32.2. Older versions are not supported.
 
 - **macOS** — open the installer package and follow the steps.
-- **Windows** — there is no installer. Close OBS, then extract the whole contents of the `.zip` into your OBS folder (usually `C:\Program Files\obs-studio`), merging it with the existing `obs-plugins` and `data` folders. Windows asks for administrator rights to write there. The archive is laid out like the OBS folder itself, so nothing needs to be moved around afterwards.
+- **Windows** — there is no installer. Close OBS, then extract the whole contents of the `.zip` into your OBS folder (usually `C:\Program Files\obs-studio`; for a portable OBS, the folder holding `bin`), merging it with the existing `obs-plugins` and `data` folders. Windows asks for administrator rights to write there. The archive is laid out like the OBS folder itself (`obs-plugins/64bit/obs-bakeup.dll`, `data/obs-plugins/obs-bakeup/`), so nothing needs to be moved around afterwards.
 
 ## 🛠️ Building from source
 
@@ -72,7 +76,9 @@ GitHub Actions builds both platforms on every push to `main`.
 
 ## 🧪 Tests
 
-The core logic (archiving, restore, encryption, settings, update check, locales) has no OBS or Qt dependency and is covered by unit tests ([Catch2](https://github.com/catchorg/Catch2)). They are built together with the plugin (`ENABLE_BACKUPER_TESTS` is on by default) as the `obs-backuper-core-tests` target and run with `ctest` from the build directory.
+The core logic has no OBS or Qt dependency and is covered by unit tests ([Catch2](https://github.com/catchorg/Catch2)): archiving, restore and rollback, the shutdown-time restore flow and its stored outcome, choosing what to switch to after a restore, scene-file snapshots, file collection (including plugin folders and OBS-shipped plugins), UTF-8 handling of non-ASCII paths, encryption and the crypto primitives, password strength, settings, update check, locales and error reporting. They are built together with the plugin (`ENABLE_BACKUPER_TESTS` is on by default) as the `obs-backuper-core-tests` target and run with `ctest` from the build directory.
+
+The thin layer that calls OBS and Qt (the dialogs, the worker threads, the frontend calls in `plugin-main.cpp`) cannot run without OBS. Everything decidable in it lives in the core and is tested there; the layer itself is compiled on every push by GitHub Actions and checked by hand against a real OBS.
 
 ## 🌐 Privacy and update check
 
@@ -80,7 +86,7 @@ When you first open the plugin's dialog in an OBS session, it makes **one** anon
 
 ## 🚧 Status
 
-Version 0.1.0 — all planned features are implemented (backup, restore, password protection, localization, update notice), but the plugin is still pre-release and has not been published yet.
+Version 0.1.0 — all planned features are implemented (backup, restore, password protection, localization, update notice). Backup and restore have been checked end to end on **Windows** (normal and portable OBS 32.2, repeated restores included). **macOS** builds and passes the same unit tests, but a full restore has not been checked there by hand yet. The plugin is still pre-release and has not been published.
 
 ## 📜 License
 

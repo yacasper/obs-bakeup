@@ -107,3 +107,87 @@ TEST_CASE("ReadIniEntries reads a file and gives nothing for a missing one", "[A
 	CHECK(entries[0].value == "abc");
 	CHECK(ReadIniEntries(dir.root, "missing.ini").empty());
 }
+
+TEST_CASE("ShouldMergeIniEntry skips install bookkeeping and the profile selection", "[ActiveSelection]")
+{
+	CHECK_FALSE(ShouldMergeIniEntry({"General", "InstallGUID", "abc"}));
+	CHECK_FALSE(ShouldMergeIniEntry({"General", "LastVersion", "1"}));
+	CHECK_FALSE(ShouldMergeIniEntry({"Basic", "Profile", "Stream"}));
+	CHECK(ShouldMergeIniEntry({"BasicWindow", "DockState", "abc"}));
+	CHECK(ShouldMergeIniEntry({"BasicWindow", "ExtraBrowserDocks", "[]"}));
+	CHECK(ShouldMergeIniEntry({"Video", "Renderer", "Direct3D 11"}));
+}
+
+namespace {
+
+const std::vector<std::string> kProfiles = {"Untitled", "Stream"};
+const std::vector<std::string> kCollections = {"Untitled", "StreamSceneCollection"};
+
+} // namespace
+
+TEST_CASE("PlanSelectionSwitch switches to a restored profile and collection OBS knows", "[ActiveSelection]")
+{
+	const auto plan = PlanSelectionSwitch({"Stream", "StreamSceneCollection"}, "Untitled", kProfiles, "Untitled",
+					      kCollections, true);
+
+	CHECK(plan.switchProfile);
+	CHECK(plan.profile == "Stream");
+	CHECK(plan.collectionAction == CollectionAction::Switch);
+	CHECK(plan.collection == "StreamSceneCollection");
+}
+
+TEST_CASE("PlanSelectionSwitch changes nothing that already matches", "[ActiveSelection]")
+{
+	const auto plan = PlanSelectionSwitch({"Stream", "StreamSceneCollection"}, "Stream", kProfiles,
+					      "StreamSceneCollection", {"StreamSceneCollection"}, true);
+
+	CHECK_FALSE(plan.switchProfile);
+	// It is the only collection, so there is nothing to step through.
+	CHECK(plan.collectionAction == CollectionAction::None);
+}
+
+TEST_CASE("PlanSelectionSwitch reloads the current collection through another one", "[ActiveSelection]")
+{
+	const auto plan = PlanSelectionSwitch({"Stream", "StreamSceneCollection"}, "Untitled", kProfiles,
+					      "StreamSceneCollection", kCollections, true);
+
+	CHECK(plan.collectionAction == CollectionAction::Reload);
+	CHECK(plan.collection == "StreamSceneCollection");
+	CHECK(plan.bounceCollection == "Untitled");
+}
+
+TEST_CASE("PlanSelectionSwitch does not reload without the restored scene files", "[ActiveSelection]")
+{
+	const auto plan = PlanSelectionSwitch({"", "StreamSceneCollection"}, "Stream", kProfiles, "StreamSceneCollection",
+					      kCollections, false);
+
+	CHECK(plan.collectionAction == CollectionAction::None);
+	CHECK(plan.bounceCollection.empty());
+}
+
+TEST_CASE("PlanSelectionSwitch leaves names OBS does not list alone", "[ActiveSelection]")
+{
+	const auto plan = PlanSelectionSwitch({"Gone", "Missing"}, "Untitled", kProfiles, "Untitled", kCollections, true);
+
+	CHECK_FALSE(plan.switchProfile);
+	CHECK(plan.collectionAction == CollectionAction::None);
+	CHECK(plan.collection.empty());
+}
+
+TEST_CASE("PlanSelectionSwitch does nothing when the restored config names nothing", "[ActiveSelection]")
+{
+	const auto plan = PlanSelectionSwitch({}, "Untitled", kProfiles, "Untitled", kCollections, true);
+
+	CHECK_FALSE(plan.switchProfile);
+	CHECK(plan.collectionAction == CollectionAction::None);
+}
+
+TEST_CASE("PlanSelectionSwitch handles non-ASCII names", "[ActiveSelection]")
+{
+	const std::string cyrillic = "\xD0\xA1ute_Cats_Animated";
+	const auto plan = PlanSelectionSwitch({"Stream", cyrillic}, "Untitled", kProfiles, "Untitled",
+					      {"Untitled", cyrillic}, true);
+
+	CHECK(plan.collectionAction == CollectionAction::Switch);
+	CHECK(plan.collection == cyrillic);
+}

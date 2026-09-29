@@ -12,6 +12,7 @@
 #include "../core/BackupManager.h"
 #include "../core/FileCollector.h"
 #include "../core/PathUtf8.h"
+#include "../core/RestoreFlow.h"
 #include "../core/RestoreManager.h"
 #include "../plugin-support.h"
 #include "../worker/BackupWorker.h"
@@ -573,7 +574,7 @@ void BackupDialog::onRestoreBackupClicked()
 			marker.fileWriteMaxAttempts = options.fileWriteMaxAttempts;
 			marker.fileWriteRetryDelayMs = options.fileWriteRetryDelayMs;
 
-			const auto markerPath = safetyBackupDir / "pending-restore.marker";
+			const auto markerPath = obs_backuper::PendingRestoreMarkerPath(safetyBackupDir);
 			std::string markerError;
 			if (!obs_backuper::RestoreManager::WritePendingRestoreMarker(markerPath, marker, markerError)) {
 				ShowErrorDialog(this, obs_module_text("RestoreDialog.RestoreError"), obs_backuper::ErrorKind::Unknown,

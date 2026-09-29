@@ -4,6 +4,7 @@
 
 #include "ActiveSelection.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -97,6 +98,49 @@ std::vector<IniEntry> ParseIniEntries(const std::string &iniText)
 		entries.push_back({section, line.substr(0, separator), line.substr(separator + 1)});
 	}
 	return entries;
+}
+
+bool ShouldMergeIniEntry(const IniEntry &entry)
+{
+	return entry.section != "General" && entry.section != "Basic";
+}
+
+SelectionSwitchPlan PlanSelectionSwitch(const ActiveSelection &restored, const std::string &currentProfile,
+					const std::vector<std::string> &knownProfiles, const std::string &currentCollection,
+					const std::vector<std::string> &knownCollections, bool haveSceneSnapshot)
+{
+	const auto contains = [](const std::vector<std::string> &names, const std::string &name) {
+		return std::find(names.begin(), names.end(), name) != names.end();
+	};
+
+	SelectionSwitchPlan plan;
+	if (!restored.profile.empty() && restored.profile != currentProfile && contains(knownProfiles, restored.profile)) {
+		plan.switchProfile = true;
+		plan.profile = restored.profile;
+	}
+
+	if (restored.sceneCollection.empty() || !contains(knownCollections, restored.sceneCollection))
+		return plan;
+
+	plan.collection = restored.sceneCollection;
+	if (restored.sceneCollection != currentCollection) {
+		plan.collectionAction = CollectionAction::Switch;
+		return plan;
+	}
+
+	// Already the current collection, so OBS loaded it before the profile was
+	// right. Reloading needs another collection to step through and the restored
+	// files to put back.
+	if (!haveSceneSnapshot)
+		return plan;
+	for (const auto &name : knownCollections) {
+		if (name != restored.sceneCollection) {
+			plan.collectionAction = CollectionAction::Reload;
+			plan.bounceCollection = name;
+			break;
+		}
+	}
+	return plan;
 }
 
 std::vector<IniEntry> ReadIniEntries(const std::filesystem::path &obsDataDir, const std::string &fileName)
