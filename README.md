@@ -67,9 +67,7 @@ GitHub Actions builds both platforms on every push to `main`.
 
 ### 🧪 Tests
 
-The core logic (archiving, restore, encryption, settings, update check, locales) has no OBS or Qt dependency and is covered by unit tests ([Catch2](https://github.com/catchorg/Catch2)):
-
-They are built together with the plugin (`ENABLE_BACKUPER_TESTS` is on by default) as the `obs-backuper-core-tests` target and run with `ctest` from the build directory.
+The core logic (archiving, restore, encryption, settings, update check, locales) has no OBS or Qt dependency and is covered by unit tests ([Catch2](https://github.com/catchorg/Catch2)). They are built together with the plugin (`ENABLE_BACKUPER_TESTS` is on by default) as the `obs-backuper-core-tests` target and run with `ctest` from the build directory.
 
 ## 🌐 Privacy and update check
 
