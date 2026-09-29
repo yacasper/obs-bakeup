@@ -20,8 +20,8 @@ Open it from **Tools → OBS Bakeup**.
 | --- | --- |
 | Global and user settings (`global.ini`, `user.ini`) | Logs |
 | Profiles and scene collections (`basic/`) | Crash reports |
-| Installed plugins: on macOS the `plugins/` folder of your OBS folder, on Windows `%ProgramData%\obs-studio\plugins` (`<OBS folder>\plugins` in portable mode) | Anything else OBS keeps internally (caches, temp files) |
-| Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins) | The plugins that ship with OBS itself, and plugins installed the old way into OBS's own program folder (`obs-plugins`, next to `obs64.exe`) |
+| Installed plugins: on macOS the `plugins/` folder of your OBS folder; on Windows `%ProgramData%\obs-studio\plugins` (`<OBS folder>\plugins` in portable mode) **and** third-party plugins installed the classic way into OBS's program folder (`obs-plugins` and `data\obs-plugins`, next to `obs64.exe`) | Anything else OBS keeps internally (caches, temp files) |
+| Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins) | The plugins and helper files that ship with OBS itself (`obs-ffmpeg`, `win-capture`, `obs-browser` and so on): they belong to one exact OBS version |
 | Themes | Your own files outside the OBS folder: images, videos, audio, fonts, recordings and other media that scenes use |
 
 > 🖼️ **Media files are not part of a backup.** Scenes refer to images, videos and other files by their path on disk, so after restoring on a new computer copy those files back to the same locations, or re-link them in the affected sources.
@@ -41,7 +41,7 @@ OBS writes its own in-memory copy of your scene collections back to disk when it
 3. extracts the backup to a staging folder;
 4. offers to restart OBS, and applies the restore on the next launch, **before** OBS loads any scene collection.
 
-> ⚠️ **On Windows, plugins live in a system folder** (`%ProgramData%\obs-studio\plugins`), which may need administrator rights to write to. If Windows refuses some plugin files, the restore still finishes — settings and every other plugin are restored — and you are told how many plugin files could not be installed; run OBS as administrator and restore again to install them.
+> ⚠️ **On Windows, plugins live in system folders** (`%ProgramData%\obs-studio\plugins` and OBS's program folder, usually under `C:\Program Files`), which may need administrator rights to write to. A backup made with a normal OBS also restores into a portable one and the other way round. If Windows refuses some plugin files, the restore still finishes — settings and every other plugin are restored — and you are told how many plugin files could not be installed; run OBS as administrator and restore again to install them.
 
 Plugins get extra care because OBS may already be running their code. They are put in place right away, while OBS is still open, so a single restart is enough for OBS to find them. A plugin file is never overwritten in place (it is left alone when identical, otherwise replaced by writing a new file and swapping it in), and this plugin's own files are never touched by a restore. Executable files keep their execute permission.
 

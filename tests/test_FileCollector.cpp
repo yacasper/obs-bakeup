@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <fstream>
 
 using namespace obs_backuper;
@@ -208,6 +209,53 @@ TEST_CASE("CollectPluginRoot names files under the archive prefix", "[FileCollec
 		expected += std::filesystem::file_size(file.absolutePath);
 	}
 	CHECK(result.totalSizeBytes == expected);
+}
+
+TEST_CASE("CollectPluginRoot leaves out the excluded stems, by any extension and case",
+	  "[FileCollector][pluginroot]")
+{
+	PluginRootFixture fixture;
+	WritePluginFile(fixture.root / "Obs-FFmpeg.dll", "shipped");
+	WritePluginFile(fixture.root / "obs-ffmpeg.pdb", "shipped symbols");
+	WritePluginFile(fixture.root / "obs-ffmpeg" / "x.ini", "shipped data folder");
+	WritePluginFile(fixture.root / "obs-ffmpeg-mux.exe", "a different, third-party name");
+
+	CollectionResult result;
+	PluginRoot root{kProgramPluginsBinPrefix, fixture.root, {"obs-ffmpeg", "bar"}};
+	CollectPluginRoot(root, result);
+
+	CHECK(ContainsRelativePath(result, std::filesystem::path("program-plugins-bin") / "foo" / "foo.dll"));
+	CHECK(ContainsRelativePath(result, std::filesystem::path("program-plugins-bin") / "obs-ffmpeg-mux.exe"));
+	CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("program-plugins-bin") / "Obs-FFmpeg.dll"));
+	CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("program-plugins-bin") / "obs-ffmpeg.pdb"));
+	CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("program-plugins-bin") / "obs-ffmpeg" / "x.ini"));
+	CHECK_FALSE(ContainsRelativePath(result, std::filesystem::path("program-plugins-bin") / "bar" / "bin" / "64bit" / "bar.dll"));
+}
+
+TEST_CASE("The OBS-shipped list names OBS's own plugins and not third-party ones", "[FileCollector][pluginroot]")
+{
+	const auto &stems = ObsShippedPluginStems();
+	const auto has = [&](const std::string &name) { return std::find(stems.begin(), stems.end(), name) != stems.end(); };
+
+	CHECK(has("obs-ffmpeg"));
+	CHECK(has("win-capture"));
+	CHECK(has("obs-browser"));
+	CHECK(has("libcef"));
+	CHECK_FALSE(has("aitum-multistream"));
+	CHECK_FALSE(has("obs-multi-rtmp"));
+	CHECK_FALSE(has("obs-bakeup"));
+	// Stems are compared as lower-case text without an extension.
+	for (const auto &stem : stems) {
+		CHECK(stem.find('.') == std::string::npos);
+		CHECK(std::none_of(stem.begin(), stem.end(), [](char c) { return c >= 'A' && c <= 'Z'; }));
+	}
+}
+
+TEST_CASE("Program-folder plugin prefixes count as plugin-root entries", "[FileCollector][pluginroot]")
+{
+	CHECK(IsPluginRootEntry(std::filesystem::path("program-plugins-bin") / "x.dll"));
+	CHECK(IsPluginRootEntry(std::filesystem::path("program-plugins-data") / "x" / "y.ini"));
+	CHECK_FALSE(IsPluginRootEntry(std::filesystem::path("program-plugins") / "x.dll"));
 }
 
 TEST_CASE("CollectPluginRoot adds to what is already collected", "[FileCollector][pluginroot]")

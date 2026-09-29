@@ -72,6 +72,25 @@ void CollectFromEntry(const std::filesystem::path &rootDir, const std::filesyste
 	}
 }
 
+// True if the first component of `relativePath` is one of root.excludedStems.
+bool IsExcludedByStem(const PluginRoot &root, const std::filesystem::path &relativePath)
+{
+	if (root.excludedStems.empty() || relativePath.empty())
+		return false;
+
+	std::string name = relativePath.begin()->generic_u8string();
+	name = name.substr(0, name.find('.'));
+	for (char &c : name) {
+		if (c >= 'A' && c <= 'Z')
+			c = static_cast<char>(c - 'A' + 'a');
+	}
+	for (const auto &stem : root.excludedStems) {
+		if (name == stem)
+			return true;
+	}
+	return false;
+}
+
 } // namespace
 
 bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath)
@@ -80,7 +99,27 @@ bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath)
 	if (first == archiveRelativePath.end())
 		return false;
 	const std::string name = first->generic_u8string();
-	return name == kSystemPluginsPrefix || name == kPortablePluginsPrefix;
+	return name == kSystemPluginsPrefix || name == kPortablePluginsPrefix || name == kProgramPluginsBinPrefix ||
+	       name == kProgramPluginsDataPrefix;
+}
+
+const std::vector<std::string> &ObsShippedPluginStems()
+{
+	static const std::vector<std::string> stems = {
+		// Plugin modules (and the data folders named after them).
+		"aja", "aja-output-ui", "decklink", "decklink-captions", "decklink-output-ui", "frontend-tools",
+		"image-source", "nv-filters", "obs-browser", "obs-ffmpeg", "obs-filters", "obs-nvenc", "obs-outputs",
+		"obs-qsv11", "obs-scripting", "obs-text", "obs-transitions", "obs-vst", "obs-webrtc", "obs-x264",
+		"rtmp-services", "text-freetype2", "vlc-video", "win-capture", "win-dshow", "win-wasapi",
+		// Helper programs and libraries that come with those modules.
+		"cef", "cef-bootstrap", "chrome_100_percent", "chrome_200_percent", "chrome_elf", "d3dcompiler_47",
+		"dxcompiler", "dxil", "get-graphics-offsets32", "get-graphics-offsets64", "graphics-hook32",
+		"graphics-hook64", "icudtl", "inject-helper32", "inject-helper64", "libcef", "libegl", "libglesv2",
+		"locales", "natives_blob", "obs-amf-test", "obs-browser-page", "obs-ffmpeg-mux", "obs-nvenc-test",
+		"obs-qsv-test", "resources", "snapshot_blob", "swiftshader", "v8_context_snapshot", "vk_swiftshader",
+		"vk_swiftshader_icd", "vulkan-1",
+	};
+	return stems;
 }
 
 void CollectPluginRoot(const PluginRoot &root, CollectionResult &result)
@@ -92,6 +131,8 @@ void CollectPluginRoot(const PluginRoot &root, CollectionResult &result)
 	CollectionResult inside;
 	CollectFromEntry(root.dir, root.dir, inside);
 	for (auto &file : inside.files) {
+		if (IsExcludedByStem(root, file.relativePath))
+			continue;
 		file.relativePath = std::filesystem::path(root.archivePrefix) / file.relativePath;
 		result.totalSizeBytes += file.sizeBytes;
 		result.files.push_back(std::move(file));

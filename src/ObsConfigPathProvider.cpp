@@ -76,6 +76,14 @@ std::vector<PluginRoot> GetExtraPluginRoots()
 		if (os_get_program_data_path(buffer, sizeof(buffer), "obs-studio/plugins") > 0 && buffer[0] != '\0')
 			roots.push_back({kSystemPluginsPrefix, PathFromUtf8(buffer)});
 	}
+
+	// Plugins installed the classic way into OBS's own program folder (in both
+	// modes), minus everything OBS itself put there.
+	const auto base = ObsBasePathFromExecutableDir(kCurrentPlatform, ExecutableDir());
+	if (!base.empty()) {
+		roots.push_back({kProgramPluginsBinPrefix, base / "obs-plugins" / "64bit", ObsShippedPluginStems()});
+		roots.push_back({kProgramPluginsDataPrefix, base / "data" / "obs-plugins", ObsShippedPluginStems()});
+	}
 #endif
 
 	return roots;

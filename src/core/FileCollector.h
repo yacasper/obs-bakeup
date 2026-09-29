@@ -31,12 +31,28 @@ struct CollectionResult {
 struct PluginRoot {
 	std::string archivePrefix; // first path component inside the archive
 	std::filesystem::path dir; // where the folder is on this machine
+	// Top-level entries of `dir` to leave out, matched case-insensitively by
+	// the part of the name before the first dot ("obs-ffmpeg" covers
+	// obs-ffmpeg.dll, obs-ffmpeg.pdb and a folder called obs-ffmpeg).
+	std::vector<std::string> excludedStems;
 };
 
 // Archive prefixes for those folders. They are fixed strings because backups
 // are restored later, possibly elsewhere, and must be recognised by name.
 inline constexpr const char *kSystemPluginsPrefix = "system-plugins";
 inline constexpr const char *kPortablePluginsPrefix = "portable-plugins";
+
+// Plugins installed the classic way, into OBS's own program folder: module
+// files in <OBS folder>\obs-plugins\64bit and their data in
+// <OBS folder>\data\obs-plugins. Two roots, because the halves live apart.
+inline constexpr const char *kProgramPluginsBinPrefix = "program-plugins-bin";
+inline constexpr const char *kProgramPluginsDataPrefix = "program-plugins-data";
+
+// Names (see PluginRoot::excludedStems) of the plugins and helper files OBS
+// installs by itself in those two folders. They belong to one exact OBS
+// version, so backing them up would let a restore overwrite a newer OBS's own
+// files with old ones; every other file there is a third-party plugin.
+const std::vector<std::string> &ObsShippedPluginStems();
 
 // True if an archive path lies under one of the plugin-root prefixes above.
 bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath);
