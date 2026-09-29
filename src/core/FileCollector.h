@@ -42,6 +42,12 @@ struct PluginRoot {
 inline constexpr const char *kSystemPluginsPrefix = "system-plugins";
 inline constexpr const char *kPortablePluginsPrefix = "portable-plugins";
 
+// macOS: plugins installed for all users, in /Library/Application Support/
+// obs-studio/plugins (the ones for the current user sit inside the obs-studio
+// settings folder and need no root). Its own prefix, so a Windows backup never
+// lands there and the other way round.
+inline constexpr const char *kMacSystemPluginsPrefix = "mac-system-plugins";
+
 // Plugins installed the classic way, into OBS's own program folder: module
 // files in <OBS folder>\obs-plugins\64bit and their data in
 // <OBS folder>\data\obs-plugins. Two roots, because the halves live apart.

@@ -90,4 +90,12 @@ std::vector<PluginRoot> ResolveWindowsPluginRoots(const std::filesystem::path &o
 	return roots;
 }
 
+std::vector<PluginRoot> ResolveMacPluginRoots(const std::optional<std::filesystem::path> &systemPluginsDir)
+{
+	std::vector<PluginRoot> roots;
+	if (systemPluginsDir && !systemPluginsDir->empty())
+		roots.push_back({kMacSystemPluginsPrefix, *systemPluginsDir, {}});
+	return roots;
+}
+
 } // namespace obs_backuper

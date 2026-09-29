@@ -74,6 +74,13 @@ std::vector<PluginRoot> GetExtraPluginRoots()
 
 	roots = ResolveWindowsPluginRoots(ObsBasePathFromExecutableDir(kCurrentPlatform, ExecutableDir()),
 					  RunningPortable(), programDataPlugins);
+#elif defined(__APPLE__)
+	std::optional<std::filesystem::path> systemPlugins;
+	char buffer[4096] = {};
+	if (os_get_program_data_path(buffer, sizeof(buffer), "obs-studio/plugins") > 0 && buffer[0] != '\0')
+		systemPlugins = PathFromUtf8(buffer);
+
+	roots = ResolveMacPluginRoots(systemPlugins);
 #endif
 
 	return roots;

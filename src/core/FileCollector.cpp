@@ -132,7 +132,7 @@ bool IsPluginRootEntry(const std::filesystem::path &archiveRelativePath)
 		return false;
 	const std::string name = first->generic_u8string();
 	return name == kSystemPluginsPrefix || name == kPortablePluginsPrefix || name == kProgramPluginsBinPrefix ||
-	       name == kProgramPluginsDataPrefix;
+	       name == kProgramPluginsDataPrefix || name == kMacSystemPluginsPrefix;
 }
 
 const std::vector<std::string> &ObsShippedPluginStems()

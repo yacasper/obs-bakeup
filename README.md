@@ -20,7 +20,7 @@ Open it from **Tools → OBS Bakeup**.
 | --- | --- |
 | Global and user settings (`global.ini`, `user.ini`), including custom browser docks and the dock layout | Logs |
 | Profiles and scene collections (`basic/`): canvas size, hotkeys, stream keys and service settings, scenes and sources | Crash reports |
-| Installed plugins: on macOS the `plugins/` folder of your OBS folder; on Windows `%ProgramData%\obs-studio\plugins` (`<OBS folder>\plugins` in portable mode) **and** third-party plugins installed the classic way into OBS's program folder (`obs-plugins` and `data\obs-plugins`, next to `obs64.exe`) | Anything else OBS keeps internally (caches, temp files) |
+| Installed plugins: on macOS the `plugins/` folder of your OBS folder **and** the plugins installed for all users (`/Library/Application Support/obs-studio/plugins`); on Windows `%ProgramData%\obs-studio\plugins` (`<OBS folder>\plugins` in portable mode) **and** third-party plugins installed the classic way into OBS's program folder (`obs-plugins` and `data\obs-plugins`, next to `obs64.exe`) | Anything else OBS keeps internally (caches, temp files) |
 | Plugin settings (`plugin_config/`, including e.g. `obs-browser` logins; not the browser's disk caches, which it rebuilds itself) | The plugins and helper files that ship with OBS itself (`obs-ffmpeg`, `win-capture`, `obs-browser` and so on): they belong to one exact OBS version |
 | Themes | Your own files outside the OBS folder: images, videos, audio, fonts, recordings and other media that scenes use |
 
@@ -41,7 +41,7 @@ Before restoring, the plugin shows when the backup was made, with which OBS vers
 
 If something goes wrong half-way, your previous settings are put back automatically.
 
-> ⚠️ **On Windows, plugins live in system folders** (`%ProgramData%\obs-studio\plugins` and OBS's program folder, usually under `C:\Program Files`), which may need administrator rights to write to. If Windows refuses some plugin files, the rest of the restore still goes through and you are told how many plugin files could not be installed; run OBS as administrator and restore again to install them.
+> ⚠️ **Some plugin folders are system folders** — on Windows `%ProgramData%\obs-studio\plugins` and OBS's program folder (usually under `C:\Program Files`), on macOS `/Library/Application Support/obs-studio/plugins` — and may need administrator rights to write to. If the system refuses some plugin files, the rest of the restore still goes through and you are told how many plugin files could not be installed; run OBS with administrator rights and restore again to install them.
 
 A few things worth knowing:
 

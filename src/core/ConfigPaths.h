@@ -53,4 +53,9 @@ std::filesystem::path ResolveObsDataDir(Platform platform, const std::optional<s
 std::vector<PluginRoot> ResolveWindowsPluginRoots(const std::filesystem::path &obsBaseDir, bool portableMode,
 						   const std::optional<std::filesystem::path> &programDataPluginsDir);
 
+// The macOS counterpart: plugins installed for all users. OBS looks for them in
+// /Library/Application Support/obs-studio/plugins (systemPluginsDir, as OBS
+// reports it); nothing if Mac could not say where that is.
+std::vector<PluginRoot> ResolveMacPluginRoots(const std::optional<std::filesystem::path> &systemPluginsDir);
+
 } // namespace obs_backuper

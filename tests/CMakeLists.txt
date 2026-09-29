@@ -43,6 +43,7 @@ add_executable(obs-backuper-core-tests
   test_Crypto.cpp
   test_WindowsLayout.cpp
   test_WindowsScenario.cpp
+  test_MacScenario.cpp
 )
 
 target_link_libraries(obs-backuper-core-tests PRIVATE obs-backuper-core Catch2::Catch2WithMain)
