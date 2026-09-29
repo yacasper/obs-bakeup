@@ -62,7 +62,7 @@ When you first open the plugin's dialog in an OBS session, it makes **one** anon
 
 ## 🚧 Status
 
-Version 0.1.2. Backup and restore are checked end to end on **Windows** (normal and portable OBS 32.2, repeated restores included) and on **macOS** (OBS 32.2, password-protected backup restored twice). macOS packages are not signed yet, so macOS may ask you to right-click the installer and choose **Open**.
+Version 0.1.3. Backup and restore are checked end to end on **Windows** (normal and portable OBS 32.2, repeated restores included) and on **macOS** (OBS 32.2, password-protected backup restored twice). macOS packages are not signed yet, so macOS may ask you to right-click the installer and choose **Open**.
 
 ## 💜 Support the project
 
